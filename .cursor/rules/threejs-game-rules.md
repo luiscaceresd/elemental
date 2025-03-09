@@ -1,0 +1,75 @@
+---
+description: Apply best practices for Three.js game development with React
+glob: "**/components/*.{jsx,tsx}"
+---
+
+# Three.js Game Development Best Practices
+
+When working on the elemental game components, follow these patterns for efficient and maintainable integration of Three.js with React:
+
+## Component Architecture
+
+1. **Separation of Concerns**:
+   - **GameCanvas**: Scene management, rendering setup, and animation loop only
+   - **Character**: Character mesh, physics, and movement logic
+   - **WaterBending**: Water elements and manipulation
+   - **MobileControls**: Mobile-specific UI controls
+
+2. **Minimal Component Coupling**:
+   - Use a registration pattern for updates instead of direct references
+   - Pass callbacks instead of sharing refs when possible
+
+## Three.js and React Integration
+
+1. **Scene Setup**:
+   - Initialize Three.js scene, camera, and renderer in a single `useEffect`
+   - Add `{ antialias: true }` to renderer for smoother edges
+   - Maintain proper aspect ratio with window resize handlers
+
+2. **Resource Management**:
+   - Always clean up Three.js objects when components unmount
+   - Use `useRef` to hold references to Three.js objects
+   - Implement proper disposal of geometries, materials, and textures
+
+3. **Animation Loop**:
+   - Use a single animation loop in the main component
+   - Implement a registration system for other components to add update functions
+   - Use delta time for frame-rate independent animations
+
+## Input Handling
+
+1. **Cross-Platform Controls**:
+   - Desktop: WASD movement, Space for jump, mouse drag for camera
+   - Mobile: Virtual joystick for movement, buttons for actions
+   - Detect device type for showing appropriate controls
+
+2. **Physics-Based Movement**:
+   - Apply physics principles (gravity, friction) for realistic movement
+   - Implement collision detection for environment interaction
+   - Control character orientation based on movement direction
+
+## Performance Considerations
+
+1. **Render Optimization**:
+   - Minimize Three.js object creation during runtime
+   - Use instancing for repeated objects
+   - Implement level-of-detail for complex scenes
+
+2. **State Management**:
+   - Use React state for UI and game state
+   - Use Three.js objects directly for visual state
+   - Consider implementing context-based state for complex games
+
+## Mobile-Specific Guidelines
+
+1. **Touch Controls**:
+   - Implement responsive touch controls with appropriate size and positioning
+   - Provide visual feedback for touch interactions
+   - Test on multiple device sizes
+
+2. **Performance**:
+   - Reduce polygon count and texture sizes for mobile
+   - Implement device capability detection
+   - Consider disabling effects on lower-end devices
+
+@file:../docs/elemental-game-guidelines.md 

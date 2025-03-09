@@ -1,0 +1,58 @@
+---
+description: Apply best practices for minimizing useEffect in React components
+glob: "**/*.{jsx,tsx}"
+---
+
+# React useEffect Best Practices
+
+When working with React components (especially in this elemental game), apply the following guidelines for useEffect:
+
+## Key Principle
+
+Only use `useEffect` for side effects (actions outside the normal render flow) - not for calculations or state updates that can be done during render.
+
+## When to Use useEffect
+
+1. **Data Fetching**: When you need to fetch data from an API upon component mount or when dependencies change.
+
+2. **Event Subscriptions**: For handling DOM event listeners (window resize, keyboard, mouse, etc.) with proper cleanup.
+
+3. **Manual DOM Manipulation**: When you need direct access to DOM elements (e.g., appending a Three.js renderer).
+
+4. **Third-Party Integrations**: For initializing and cleaning up external libraries (Three.js, Hammer.js, Nipple.js).
+
+## When NOT to Use useEffect
+
+1. **Computing Derived Values**: Calculate values directly in the render function or use `useMemo` instead.
+   
+2. **Updating State Based on Props**: Don't use an effect to update local state based on props.
+
+3. **Logging/Side Effects After State Change**: Handle these in the event handler that triggers the state change.
+
+4. **Initializing State**: Use the function form of `useState` for computed initial values.
+
+## Implementation Checklist
+
+Before using `useEffect`:
+
+1. Does this actually require side effects (DOM/browser API access)?
+2. Can this be calculated during render with `useMemo`?
+3. Is this related to event handling? If so, do it directly in the handler.
+4. For reusable functionality, extract a custom hook.
+
+## Game-Specific Guidelines
+
+For this elemental game:
+
+1. **ThreeJS Operations**: Keep all Three.js scene operations (creating meshes, adding to scene) in well-managed effects.
+
+2. **Animation Loop**: Use a single animation loop rather than multiple effects.
+
+3. **Input Handling**: Handle input state updates through direct event handlers.
+
+4. **Custom Hooks**: Create custom hooks for reusable functionality like:
+   - `usePanGesture` for Hammer.js pan handling
+   - `useGameLoop` for animation loop logic
+
+@file:../docs/best-practices.md
+@file:../docs/elemental-game-guidelines.md 

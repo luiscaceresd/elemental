@@ -1,36 +1,78 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Elemental Game
 
-## Getting Started
+A 3D game built with Next.js, Three.js, and React where players can manipulate elemental powers.
 
-First, run the development server:
+## Overview
+
+This game allows players to control a character and manipulate elemental powers like water. It features:
+
+- 3D environment using Three.js
+- Responsive design for both desktop and mobile
+- WASD/Arrow key movement for desktop
+- Touch controls for mobile using joystick and buttons
+- Realistic physics-based movement
+
+## Development
+
+### Installation
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+# Install dependencies
+pnpm install
+
+# Run development server
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Project Structure
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `app/page.tsx` - Main entry point
+- `app/components/GameWrapper.tsx` - Client component wrapper for dynamic imports
+- `app/components/GameCanvas.tsx` - Main game scene manager
+- `app/components/Character.tsx` - Character management
+- `app/components/WaterBending.tsx` - Water element management
+- `app/components/MobileControls.tsx` - Mobile-specific controls
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Documentation
 
-## Learn More
+For code organization and best practices:
 
-To learn more about Next.js, take a look at the following resources:
+- [React Best Practices](./docs/best-practices.md) - Guidelines for React usage, particularly on minimizing useEffect
+- [Elemental Game Guidelines](./docs/elemental-game-guidelines.md) - Specific guidelines for this project
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Cursor Rules
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This project uses Cursor Rules to enforce coding standards and best practices:
 
-## Deploy on Vercel
+- `.cursor/rules/react-useEffect-rules.md` - Rules for minimizing useEffect in React components
+- `.cursor/rules/threejs-game-rules.md` - Best practices for Three.js game development
+- `.cursor/rules/project-standards.md` - General project coding standards
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+These rules are automatically applied by Cursor when working with relevant files, ensuring consistent code quality throughout the project.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Controls
+
+### Desktop
+- `W` - Move forward
+- `A` - Move left
+- `S` - Move backward
+- `D` - Move right
+- `Space` - Jump
+- Mouse Drag - Rotate camera
+
+### Mobile
+- Virtual joystick (bottom left) - Move character
+- Jump button (bottom right) - Jump
+- Touch and drag - Manipulate water
+
+## Technologies
+
+- Next.js
+- React
+- Three.js - 3D rendering
+- Hammer.js - Touch gestures
+- Nipple.js - Virtual joystick
+
+## License
+
+MIT

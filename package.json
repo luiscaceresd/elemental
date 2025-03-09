@@ -9,19 +9,25 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "hammerjs": "^2.0.8",
+    "next": "15.2.1",
+    "pnpm": "^10.6.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "next": "15.2.1"
+    "three": "^0.174.0",
+    "nipplejs": "^0.10.1"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/hammerjs": "^2.0.46",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
+    "@types/three": "^0.174.0",
     "eslint": "^9",
     "eslint-config-next": "15.2.1",
-    "@eslint/eslintrc": "^3"
+    "tailwindcss": "^4",
+    "typescript": "^5"
   }
 }
