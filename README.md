@@ -1,6 +1,64 @@
-# Elemental Game
+# Elemental Game - Studio Ghibli Inspired 3D Game
 
-A 3D game built with Next.js, Three.js, and React where players can manipulate elemental powers.
+A beautiful 3D game with Studio Ghibli-inspired visuals, built with Three.js and React.
+
+## Features
+
+### Waterbending Mechanism
+
+The game includes a waterbending mechanic allowing you to manipulate water entities:
+
+1. **Water Entities**: Blue spheres scattered throughout the environment that represent manipulable water
+2. **Crosshair**: Centered on your screen, used to target water for bending
+3. **Waterbending Control**: Hold down the left mouse button to attract nearby water toward your crosshair
+
+#### How to Use
+
+1. Position your crosshair near water entities (blue spheres)
+2. Hold the left mouse button to activate waterbending
+3. Water within range will be pulled toward your crosshair
+4. Release the mouse button to stop the waterbending effect
+
+The closer the water is to your crosshair, the stronger the pulling effect will be.
+
+### Environment
+
+- **Terrain**: Procedurally generated landscape with realistic color variations based on height and slope
+- **Trees**: Whimsical, Ghibli-inspired trees scattered across the terrain
+- **Sky**: Gradient sky with atmospheric depth
+- **Water**: Both manipulable water entities and a larger water plane with realistic wave animations
+
+### Controls
+
+- **WASD**: Move character
+- **Space**: Jump
+- **Mouse**: Look around
+- **Left Mouse Button**: Waterbend
+- **Mobile**: On-screen joystick and jump button
+
+## Technical Details
+
+- **Character-Terrain Collision**: Character properly follows the contours of the terrain
+- **Shader-Based Water**: Custom shaders for realistic water with wave animations
+- **Atmospheric Effects**: Fog and lighting to create a Ghibli-inspired aesthetic
+
+## Development
+
+This project uses:
+- Next.js
+- Three.js for 3D rendering
+- React for UI components
+- TypeScript for type safety
+
+To run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) to see the result.
 
 ## Overview
 

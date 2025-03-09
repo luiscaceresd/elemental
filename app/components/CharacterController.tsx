@@ -55,7 +55,7 @@ export default function CharacterController({
       characterRef.current = character;
 
       // Physics constants
-      const moveSpeed = 20;
+      const moveSpeed = 30;
       const jumpForce = 15;
       const gravity = 30;
       const friction = 0.9;
@@ -63,6 +63,17 @@ export default function CharacterController({
       // Set up a simple ground detection ray
       const raycaster = new THREE.Raycaster();
       const downDirection = new THREE.Vector3(0, -1, 0);
+
+      const getTerrainHeight = (x: number, z: number) => {
+        // Use the exported function from World component if available
+        // @ts-ignore
+        if (window.getTerrainHeight) {
+          // @ts-ignore
+          return window.getTerrainHeight(x, z);
+        }
+        // Fallback if the function is not available
+        return 0;
+      };
 
       // Define the update function for physics-based movement
       const update: IdentifiableFunction = (delta: number) => {
@@ -98,10 +109,10 @@ export default function CharacterController({
           moveDirection.sub(cameraDirection);
         }
         if (keys.a) {
-          moveDirection.sub(cameraRight);
+          moveDirection.add(cameraRight);
         }
         if (keys.d) {
-          moveDirection.add(cameraRight);
+          moveDirection.sub(cameraRight);
         }
 
         // Normalize if we're moving in a direction
@@ -126,14 +137,23 @@ export default function CharacterController({
 
         // Update position based on velocity
         character.position.x += velocityRef.current.x * delta;
-        character.position.y += velocityRef.current.y * delta;
         character.position.z += velocityRef.current.z * delta;
 
-        // Prevent falling through the ground
-        if (character.position.y < 1) {
-          character.position.y = 1;
+        // Get the terrain height at the character's position
+        const terrainHeight = getTerrainHeight(character.position.x, character.position.z);
+
+        // Apply y velocity and check for ground collision
+        character.position.y += velocityRef.current.y * delta;
+
+        // Prevent falling through the terrain
+        const characterHeight = 1; // Offset for character's height
+        if (character.position.y < terrainHeight + characterHeight) {
+          character.position.y = terrainHeight + characterHeight;
           velocityRef.current.y = 0;
           onGroundRef.current = true;
+        } else {
+          // If we're above the terrain, we're not on the ground
+          onGroundRef.current = false;
         }
 
         // Rotate character to face movement direction

@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import * as THREE from 'three';
 import CharacterController from './CharacterController';
 import CameraController from './CameraController';
 import WaterBending from './WaterBending';
 import MobileControls from './MobileControls';
-import * as THREE from 'three';
+import World from './World';
+import Water from './Water';
+import Crosshair from './Crosshair';
 
 // Add a type for functions with an identifier
 type IdentifiableFunction = ((delta: number) => void) & {
@@ -42,6 +45,7 @@ export default function GameCanvas() {
   });
   const characterPositionRef = useRef<THREE.Vector3 | null>(null);
   const updateFunctionsRef = useRef<IdentifiableFunction[]>([]);
+  const waterEntitiesRef = useRef<THREE.Vector3[]>([]);
 
   // Detect if we're on a mobile device - this effect is necessary as it involves window APIs
   useEffect(() => {
@@ -87,22 +91,33 @@ export default function GameCanvas() {
       if (!containerRef.current) return;
       containerRef.current.appendChild(renderer.domElement);
 
-      // Add ambient light
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      // Studio Ghibli inspired lighting
+      // Soft ambient light
+      const ambientLight = new THREE.AmbientLight(0x404040, 1);
       scene.add(ambientLight);
 
-      // Add directional light (like sun)
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      // Warm golden directional light for the "golden hour" feel
+      const directionalLight = new THREE.DirectionalLight(0xffd700, 0.8);
       directionalLight.position.set(10, 20, 10);
       scene.add(directionalLight);
 
-      // Ground plane
-      const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(100, 100, 1, 1),
-        new THREE.MeshBasicMaterial({ color: 0x228B22 }) // Forest green
-      );
-      ground.rotation.x = -Math.PI / 2; // Rotate to lie flat
-      scene.add(ground);
+      // Add fog for atmospheric depth
+      scene.fog = new THREE.Fog(0x87CEFA, 50, 200);
+
+      // Create water entities around the scene
+      const waterPositions = [
+        new THREE.Vector3(5, 1, 5),
+        new THREE.Vector3(-5, 1, 5),
+        new THREE.Vector3(10, 1, -5),
+        new THREE.Vector3(-10, 1, -10),
+        new THREE.Vector3(0, 1, -15),
+        new THREE.Vector3(15, 1, 0),
+        new THREE.Vector3(-15, 1, 0),
+        new THREE.Vector3(7, 1, 12),
+        new THREE.Vector3(-7, 1, -12),
+      ];
+
+      waterEntitiesRef.current = waterPositions;
 
       // Initialize character position reference
       characterPositionRef.current = new THREE.Vector3(0, 1, 5);
@@ -223,8 +238,19 @@ export default function GameCanvas() {
 
   return (
     <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'relative' }}>
+      {/* Replace static crosshair with dynamic component */}
+      <Crosshair />
+
       {sceneReady && sceneRef.current && rendererRef.current && cameraRef.current && characterPositionRef.current && (
         <>
+          {/* Add the World component for Ghibli-style environment */}
+          <World scene={sceneRef.current} />
+
+          {/* Add water entities */}
+          {waterEntitiesRef.current.map((position, index) => (
+            <Water key={index} position={position} scene={sceneRef.current!} />
+          ))}
+
           <CharacterController
             scene={sceneRef.current}
             keysRef={keysRef}
@@ -243,6 +269,8 @@ export default function GameCanvas() {
           <WaterBending
             scene={sceneRef.current}
             domElement={rendererRef.current.domElement}
+            registerUpdate={registerUpdate}
+            camera={cameraRef.current}
           />
 
           {/* Show mobile controls only on mobile devices */}
