@@ -13,15 +13,15 @@ interface WaterBendingProps {
   domElement: HTMLCanvasElement;
   registerUpdate: (updateFn: IdentifiableFunction) => () => void;
   camera: THREE.Camera;
+  isBendingRef: React.MutableRefObject<boolean>;
+  crosshairPositionRef: React.MutableRefObject<THREE.Vector3>;
 }
 
-export default function WaterBending({ scene, domElement, registerUpdate, camera }: WaterBendingProps) {
-  const waterRef = useRef<THREE.Mesh | null>(null);
-  const waterMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
-  const mouseDownRef = useRef(false);
-  const crosshairPositionRef = useRef<THREE.Vector3 | null>(null);
+export default function WaterBending({ scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
   const mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  const bendingEffectRef = useRef<THREE.Mesh | null>(null);
+  const bendingParticlesRef = useRef<THREE.Points | null>(null);
 
   // This useEffect is necessary for THREE.js integration, Hammer.js setup, and mouse handling
   useEffect(() => {
@@ -34,111 +34,46 @@ export default function WaterBending({ scene, domElement, registerUpdate, camera
       // Initialize raycaster for mouse position in 3D space
       raycasterRef.current = new THREE.Raycaster();
 
-      // Create a shader-based water material for the main water body
-      const waterMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-          time: { value: 0 },
-          waterColor: { value: new THREE.Color(0x1E90FF) }, // Dodger Blue
-          waveSpeed: { value: 0.5 },
-          waveHeight: { value: 0.2 },
-        },
-        vertexShader: `
-          uniform float time;
-          uniform float waveSpeed;
-          uniform float waveHeight;
-          varying vec2 vUv;
-          varying float vElevation;
-          
-          void main() {
-            vUv = uv;
-            
-            // Create wave patterns
-            vec3 pos = position;
-            float elevation = sin(pos.x * 0.5 + time * waveSpeed) * waveHeight;
-            elevation += cos(pos.z * 0.5 + time * waveSpeed) * waveHeight;
-            elevation += sin((pos.x + pos.z) * 0.3 + time * waveSpeed) * waveHeight * 0.5;
-            
-            pos.y += elevation;
-            vElevation = elevation;
-            
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-          }
-        `,
-        fragmentShader: `
-          uniform vec3 waterColor;
-          varying vec2 vUv;
-          varying float vElevation;
-          
-          void main() {
-            // Add some depth variation based on elevation
-            vec3 color = waterColor;
-            color += vElevation * 0.2; // Lighter at wave peaks
-            
-            // Add edge effect
-            float edge = 0.1;
-            float alpha = 0.7; // Base transparency
-            
-            // More transparent at edges
-            if (vUv.x < edge) alpha *= vUv.x / edge;
-            if (vUv.x > 1.0 - edge) alpha *= (1.0 - vUv.x) / edge;
-            if (vUv.y < edge) alpha *= vUv.y / edge;
-            if (vUv.y > 1.0 - edge) alpha *= (1.0 - vUv.y) / edge;
-            
-            gl_FragColor = vec4(color, alpha);
-          }
-        `,
+      // Create visual indicator for bending - follows crosshair
+      const glowGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: 0x00BFFF, // Deep sky blue
         transparent: true,
-        side: THREE.DoubleSide,
+        opacity: 0.0, // Start invisible
       });
-      waterMaterialRef.current = waterMaterial;
 
-      // Create the water mesh with more segments for better wave visualization
-      const water = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 20, 32, 32), // More segments for smoother waves
-        waterMaterial
-      );
-      water.position.set(0, 0.1, 0);
-      water.rotation.x = -Math.PI / 2; // Lay flat on the ground
-      scene.add(water);
-      waterRef.current = water;
+      const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+      scene.add(glowMesh);
+      bendingEffectRef.current = glowMesh;
 
-      // Animation update function for water waves
-      const updateWater: IdentifiableFunction = (delta: number) => {
-        if (waterMaterial) {
-          waterMaterial.uniforms.time.value += delta * 0.5;
-        }
-      };
-      updateWater._id = 'waterAnimation';
+      // Create particle system for water bending effect
+      const particleCount = 100;
+      const particleGeometry = new THREE.BufferGeometry();
+      const particlePositions = new Float32Array(particleCount * 3);
 
-      // Waterbending logic - attract water entities to crosshair position
-      const updateWaterbending: IdentifiableFunction = (delta: number) => {
-        if (mouseDownRef.current && crosshairPositionRef.current) {
-          // Find all water entities in the scene
-          const waterEntities = scene.children.filter(child =>
-            child.userData && child.userData.isWater === true);
+      // Initialize particles off-screen
+      for (let i = 0; i < particleCount; i++) {
+        const i3 = i * 3;
+        particlePositions[i3] = 0;
+        particlePositions[i3 + 1] = -1000; // Off-screen
+        particlePositions[i3 + 2] = 0;
+      }
 
-          // For each water entity, check if it's within range and move it
-          waterEntities.forEach(waterEntity => {
-            const direction = crosshairPositionRef.current!.clone().sub(waterEntity.position);
-            const distance = direction.length();
+      particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
 
-            // Only attract water within 20 units
-            if (distance < 20) {
-              direction.normalize();
-              // Stronger pull when closer
-              const pullStrength = 15 * (1 - distance / 20);
-              waterEntity.position.add(direction.multiplyScalar(pullStrength * delta));
-            }
-          });
-        }
-      };
-      updateWaterbending._id = 'waterbendingAttraction';
+      const particleMaterial = new THREE.PointsMaterial({
+        color: 0x87CEFA, // Light sky blue
+        size: 0.2,
+        transparent: true,
+        opacity: 0.7,
+        blending: THREE.AdditiveBlending,
+      });
 
-      // Register both update functions
-      const removeWaterAnimation = registerUpdate(updateWater);
-      const removeWaterbendingAttraction = registerUpdate(updateWaterbending);
+      const particles = new THREE.Points(particleGeometry, particleMaterial);
+      scene.add(particles);
+      bendingParticlesRef.current = particles;
 
-      // Update crosshair position based on mouse position
+      // Function to update crosshair position from mouse/touch input
       const updateCrosshairPosition = (clientX: number, clientY: number) => {
         if (!camera || !raycasterRef.current) return;
 
@@ -152,21 +87,27 @@ export default function WaterBending({ scene, domElement, registerUpdate, camera
         raycasterRef.current.setFromCamera(mousePositionRef.current, camera);
 
         // Calculate the point 15 units along the ray for the crosshair position
-        crosshairPositionRef.current = raycasterRef.current.ray.origin.clone()
+        const newPosition = raycasterRef.current.ray.origin.clone()
           .add(raycasterRef.current.ray.direction.clone().multiplyScalar(15));
+
+        crosshairPositionRef.current.copy(newPosition);
+
+        console.log('Crosshair position updated:', crosshairPositionRef.current); // Debug log
       };
 
-      // Set up mouse events with window to match the Crosshair component
+      // Mouse event handlers
       const onMouseDown = (event: MouseEvent) => {
         if (event.button === 0) { // Left button
-          mouseDownRef.current = true;
+          isBendingRef.current = true;
           updateCrosshairPosition(event.clientX, event.clientY);
+          console.log('Bending started:', isBendingRef.current); // Debug log
         }
       };
 
       const onMouseUp = (event: MouseEvent) => {
         if (event.button === 0) { // Left button
-          mouseDownRef.current = false;
+          isBendingRef.current = false;
+          console.log('Bending stopped:', isBendingRef.current); // Debug log
         }
       };
 
@@ -174,10 +115,10 @@ export default function WaterBending({ scene, domElement, registerUpdate, camera
         updateCrosshairPosition(event.clientX, event.clientY);
       };
 
-      // Add event listeners to window instead of domElement
-      window.addEventListener('mousedown', onMouseDown);
-      window.addEventListener('mouseup', onMouseUp);
-      window.addEventListener('mousemove', onMouseMove);
+      // Add event listeners to window for maximum capture
+      window.addEventListener('mousedown', onMouseDown, { capture: true });
+      window.addEventListener('mouseup', onMouseUp, { capture: true });
+      window.addEventListener('mousemove', onMouseMove, { capture: true });
 
       // Set up Hammer.js for touch input for mobile support
       const hammer = new Hammer(domElement);
@@ -185,28 +126,107 @@ export default function WaterBending({ scene, domElement, registerUpdate, camera
       hammer.add(pan);
 
       hammer.on('panstart', (event) => {
-        mouseDownRef.current = true;
+        isBendingRef.current = true;
         updateCrosshairPosition(event.center.x, event.center.y);
+        console.log('Touch bending started:', isBendingRef.current); // Debug log
       });
 
       hammer.on('panend', () => {
-        mouseDownRef.current = false;
+        isBendingRef.current = false;
+        console.log('Touch bending stopped:', isBendingRef.current); // Debug log
       });
 
       hammer.on('pan', (event) => {
         updateCrosshairPosition(event.center.x, event.center.y);
       });
 
+      // Visual effect update for bending
+      const updateBendingEffects: IdentifiableFunction = (delta: number) => {
+        if (isBendingRef.current && crosshairPositionRef.current) {
+          // Update glow position and make it visible
+          if (bendingEffectRef.current) {
+            bendingEffectRef.current.position.copy(crosshairPositionRef.current);
+            (bendingEffectRef.current.material as THREE.MeshBasicMaterial).opacity = 0.4;
+            bendingEffectRef.current.scale.set(
+              1 + Math.sin(Date.now() * 0.005) * 0.3,
+              1 + Math.sin(Date.now() * 0.005) * 0.3,
+              1 + Math.sin(Date.now() * 0.005) * 0.3
+            );
+          }
+
+          // Update particles to flow toward crosshair
+          if (bendingParticlesRef.current) {
+            const positions = bendingParticlesRef.current.geometry.attributes.position.array as Float32Array;
+
+            for (let i = 0; i < 100; i++) {
+              const i3 = i * 3;
+
+              // Randomly activate some particles when bending
+              if (positions[i3 + 1] < -100 && Math.random() < 0.1) {
+                // Position particles in a spiral around the crosshair
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 2 + Math.random() * 4;
+
+                positions[i3] = crosshairPositionRef.current.x + Math.cos(angle) * radius;
+                positions[i3 + 1] = crosshairPositionRef.current.y;
+                positions[i3 + 2] = crosshairPositionRef.current.z + Math.sin(angle) * radius;
+              } else if (positions[i3 + 1] > -100) {
+                // Move existing particles toward crosshair
+                const dirX = crosshairPositionRef.current.x - positions[i3];
+                const dirY = crosshairPositionRef.current.y - positions[i3 + 1];
+                const dirZ = crosshairPositionRef.current.z - positions[i3 + 2];
+
+                const length = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+
+                if (length < 0.5) {
+                  // Particle reached crosshair, deactivate it
+                  positions[i3 + 1] = -1000;
+                } else {
+                  // Move particle toward crosshair
+                  positions[i3] += dirX / length * 5 * delta;
+                  positions[i3 + 1] += dirY / length * 5 * delta;
+                  positions[i3 + 2] += dirZ / length * 5 * delta;
+                }
+              }
+            }
+
+            bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
+          }
+
+          // Log bending state periodically
+          if (Math.random() < 0.01) {
+            console.log('Still bending:', isBendingRef.current, 'at', crosshairPositionRef.current);
+          }
+        } else {
+          // Hide effects when not bending
+          if (bendingEffectRef.current) {
+            (bendingEffectRef.current.material as THREE.MeshBasicMaterial).opacity = 0;
+          }
+
+          // Move all particles off-screen
+          if (bendingParticlesRef.current) {
+            const positions = bendingParticlesRef.current.geometry.attributes.position.array as Float32Array;
+
+            for (let i = 0; i < 100; i++) {
+              positions[i * 3 + 1] = -1000;
+            }
+
+            bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
+          }
+        }
+      };
+      updateBendingEffects._id = 'bendingVisualEffects';
+      const removeEffectsUpdate = registerUpdate(updateBendingEffects);
+
       // Cleanup
       return () => {
-        scene.remove(water);
+        if (bendingEffectRef.current) scene.remove(bendingEffectRef.current);
+        if (bendingParticlesRef.current) scene.remove(bendingParticlesRef.current);
         hammer.destroy();
-        removeWaterAnimation();
-        removeWaterbendingAttraction();
-        waterMaterial.dispose();
-        window.removeEventListener('mousedown', onMouseDown);
-        window.removeEventListener('mouseup', onMouseUp);
-        window.removeEventListener('mousemove', onMouseMove);
+        removeEffectsUpdate();
+        window.removeEventListener('mousedown', onMouseDown, { capture: true });
+        window.removeEventListener('mouseup', onMouseUp, { capture: true });
+        window.removeEventListener('mousemove', onMouseMove, { capture: true });
       };
     };
 
@@ -217,7 +237,7 @@ export default function WaterBending({ scene, domElement, registerUpdate, camera
         if (cleanupFn) cleanupFn();
       });
     };
-  }, [scene, domElement, registerUpdate, camera]);
+  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef]);
 
   return null; // No DOM rendering, just Three.js logic
 } 

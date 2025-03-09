@@ -7,7 +7,7 @@ import CameraController from './CameraController';
 import WaterBending from './WaterBending';
 import MobileControls from './MobileControls';
 import World from './World';
-import Water from './Water';
+import Pond from './Pond';
 import Crosshair from './Crosshair';
 
 // Add a type for functions with an identifier
@@ -45,7 +45,10 @@ export default function GameCanvas() {
   });
   const characterPositionRef = useRef<THREE.Vector3 | null>(null);
   const updateFunctionsRef = useRef<IdentifiableFunction[]>([]);
-  const waterEntitiesRef = useRef<THREE.Vector3[]>([]);
+
+  // New refs for waterbending
+  const isBendingRef = useRef<boolean>(false);
+  const crosshairPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   // Detect if we're on a mobile device - this effect is necessary as it involves window APIs
   useEffect(() => {
@@ -96,28 +99,34 @@ export default function GameCanvas() {
       const ambientLight = new THREE.AmbientLight(0x404040, 1);
       scene.add(ambientLight);
 
-      // Warm golden directional light for the "golden hour" feel
-      const directionalLight = new THREE.DirectionalLight(0xffd700, 0.8);
+      // White main light for accurate water color rendering
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); // White light for truer colors
       directionalLight.position.set(10, 20, 10);
+      directionalLight.castShadow = true; // Enable shadows
+
+      // Configure shadow properties for better quality
+      directionalLight.shadow.mapSize.width = 2048;
+      directionalLight.shadow.mapSize.height = 2048;
+      directionalLight.shadow.camera.near = 0.5;
+      directionalLight.shadow.camera.far = 500;
+      directionalLight.shadow.camera.left = -100;
+      directionalLight.shadow.camera.right = 100;
+      directionalLight.shadow.camera.top = 100;
+      directionalLight.shadow.camera.bottom = -100;
+      directionalLight.shadow.bias = -0.0001;
       scene.add(directionalLight);
 
+      // Add secondary fill light for more depth
+      const fillLight = new THREE.DirectionalLight(0xE6D8AD, 0.3); // Warm fill light
+      fillLight.position.set(-5, 10, -10);
+      scene.add(fillLight);
+
+      // Enable shadows in renderer
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
       // Add fog for atmospheric depth
-      scene.fog = new THREE.Fog(0x87CEFA, 50, 200);
-
-      // Create water entities around the scene
-      const waterPositions = [
-        new THREE.Vector3(5, 1, 5),
-        new THREE.Vector3(-5, 1, 5),
-        new THREE.Vector3(10, 1, -5),
-        new THREE.Vector3(-10, 1, -10),
-        new THREE.Vector3(0, 1, -15),
-        new THREE.Vector3(15, 1, 0),
-        new THREE.Vector3(-15, 1, 0),
-        new THREE.Vector3(7, 1, 12),
-        new THREE.Vector3(-7, 1, -12),
-      ];
-
-      waterEntitiesRef.current = waterPositions;
+      scene.fog = new THREE.Fog(0x87CEFA, 70, 300); // Increased distance for better visibility
 
       // Initialize character position reference
       characterPositionRef.current = new THREE.Vector3(0, 1, 5);
@@ -244,12 +253,23 @@ export default function GameCanvas() {
       {sceneReady && sceneRef.current && rendererRef.current && cameraRef.current && characterPositionRef.current && (
         <>
           {/* Add the World component for Ghibli-style environment */}
-          <World scene={sceneRef.current} />
+          <World
+            scene={sceneRef.current}
+            isBendingRef={isBendingRef}
+            crosshairPositionRef={crosshairPositionRef}
+            registerUpdate={registerUpdate}
+          />
 
-          {/* Add water entities */}
-          {waterEntitiesRef.current.map((position, index) => (
-            <Water key={index} position={position} scene={sceneRef.current!} />
-          ))}
+          {/* Add pond directly (not needed if already added in World) */}
+          <Pond
+            position={new THREE.Vector3(20, 0, 20)}
+            size={15}
+            depth={3}
+            scene={sceneRef.current}
+            isBendingRef={isBendingRef}
+            crosshairPositionRef={crosshairPositionRef}
+            registerUpdate={registerUpdate}
+          />
 
           <CharacterController
             scene={sceneRef.current}
@@ -271,6 +291,8 @@ export default function GameCanvas() {
             domElement={rendererRef.current.domElement}
             registerUpdate={registerUpdate}
             camera={cameraRef.current}
+            isBendingRef={isBendingRef}
+            crosshairPositionRef={crosshairPositionRef}
           />
 
           {/* Show mobile controls only on mobile devices */}

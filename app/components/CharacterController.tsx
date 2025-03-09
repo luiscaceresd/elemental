@@ -32,6 +32,7 @@ export default function CharacterController({
   const velocityRef = useRef<THREE.Vector3 | null>(null);
   const onGroundRef = useRef(true);
   const characterPositionRef = useRef<THREE.Vector3 | null>(null);
+  const lastTerrainHeightRef = useRef<number>(0);
 
   // This useEffect is necessary for THREE.js integration and physics
   useEffect(() => {
@@ -51,6 +52,8 @@ export default function CharacterController({
 
       // Set initial position
       character.position.copy(characterPositionRef.current);
+      // Enable shadows
+      character.castShadow = true;
       scene.add(character);
       characterRef.current = character;
 
@@ -60,19 +63,40 @@ export default function CharacterController({
       const gravity = 30;
       const friction = 0.9;
 
-      // Set up a simple ground detection ray
+      // Set up a ground detection ray
       const raycaster = new THREE.Raycaster();
       const downDirection = new THREE.Vector3(0, -1, 0);
 
-      const getTerrainHeight = (x: number, z: number) => {
-        // Use the exported function from World component if available
-        // @ts-ignore
-        if (window.getTerrainHeight) {
-          // @ts-ignore
-          return window.getTerrainHeight(x, z);
+      // Helper to get terrain height using both methods
+      const getTerrainHeight = (x: number, z: number): number => {
+        let height = 0;
+
+        // First try using the World's getTerrainHeight function
+        if (typeof window !== 'undefined' && (window as any).getTerrainHeight) {
+          height = (window as any).getTerrainHeight(x, z);
         }
-        // Fallback if the function is not available
-        return 0;
+
+        // Then use raycasting as a backup/verification
+        const rayOrigin = new THREE.Vector3(x, 100, z); // Start high above
+        raycaster.set(rayOrigin, downDirection);
+
+        // Cast ray against terrain
+        const terrainObject = scene.getObjectByName('terrain');
+        if (terrainObject) {
+          const intersects = raycaster.intersectObject(terrainObject, false);
+          if (intersects.length > 0) {
+            // Found terrain intersection point
+            const raycastHeight = intersects[0].point.y;
+
+            // Use the highest value to be safe
+            height = Math.max(height, raycastHeight);
+          }
+        }
+
+        // Store for debugging
+        lastTerrainHeightRef.current = height;
+
+        return height;
       };
 
       // Define the update function for physics-based movement
@@ -135,25 +159,34 @@ export default function CharacterController({
           velocityRef.current.y = Math.max(0, velocityRef.current.y);
         }
 
-        // Update position based on velocity
-        character.position.x += velocityRef.current.x * delta;
-        character.position.z += velocityRef.current.z * delta;
+        // Update position based on velocity - but check terrain height at each step
+        const newX = character.position.x + velocityRef.current.x * delta;
+        const newZ = character.position.z + velocityRef.current.z * delta;
 
-        // Get the terrain height at the character's position
-        const terrainHeight = getTerrainHeight(character.position.x, character.position.z);
+        // Check terrain height at proposed new position
+        const terrainHeight = getTerrainHeight(newX, newZ);
 
-        // Apply y velocity and check for ground collision
+        // Update horizontal position
+        character.position.x = newX;
+        character.position.z = newZ;
+
+        // Apply y velocity 
         character.position.y += velocityRef.current.y * delta;
 
-        // Prevent falling through the terrain
+        // Debug logging
+        console.log(`Char Y: ${character.position.y.toFixed(2)}, Terrain: ${terrainHeight.toFixed(2)}, Delta: ${(character.position.y - terrainHeight).toFixed(2)}`);
+
+        // Prevent falling through the terrain with a buffer
         const characterHeight = 1; // Offset for character's height
-        if (character.position.y < terrainHeight + characterHeight) {
-          character.position.y = terrainHeight + characterHeight;
+        const minimumHeight = terrainHeight + characterHeight;
+
+        if (character.position.y < minimumHeight) {
+          character.position.y = minimumHeight;
           velocityRef.current.y = 0;
           onGroundRef.current = true;
         } else {
-          // If we're above the terrain, we're not on the ground
-          onGroundRef.current = false;
+          // If we're above the terrain by a threshold, we're not on the ground
+          onGroundRef.current = (character.position.y - minimumHeight) < 0.1;
         }
 
         // Rotate character to face movement direction
