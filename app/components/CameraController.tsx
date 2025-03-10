@@ -9,8 +9,8 @@ type IdentifiableFunction = ((delta: number) => void) & {
 
 interface CameraControllerProps {
   camera: THREE.Camera;
-  targetRef: React.RefObject<THREE.Vector3 | null>; // Reference to the position to follow
-  domElement: HTMLCanvasElement; // For mouse/touch controls
+  targetRef: React.RefObject<THREE.Vector3 | null>; // Character position
+  domElement: HTMLCanvasElement;
   registerUpdate: (updateFn: IdentifiableFunction) => () => void;
 }
 
@@ -20,8 +20,8 @@ export default function CameraController({
   domElement,
   registerUpdate
 }: CameraControllerProps) {
-  const thetaRef = useRef(0); // Horizontal angle for camera rotation
-  const lastMouseXRef = useRef(0); // Tracks last mouse X position
+  const yawRef = useRef(0);   // Horizontal rotation
+  const pitchRef = useRef(0); // Vertical rotation
 
   useEffect(() => {
     if (!camera || !targetRef.current || !domElement) return;
@@ -29,66 +29,69 @@ export default function CameraController({
     const setupCamera = async () => {
       const THREE = await import('three');
 
-      // Set initial camera position
-      camera.position.set(0, 10, 20);
+      const sensitivity = 0.001; // Mouse sensitivity
+      const distance = 10;       // Distance from character
+      const height = 5;          // Height above character
 
-      // Initialize lastMouseX to the center of the screen
-      lastMouseXRef.current = window.innerWidth / 2;
+      // Initial pitch setting for camera orientation
+      pitchRef.current = 0.2;    // Initial pitch of ~11.5 degrees
 
-      // Define the deadzone (in pixels)
-      const deadzone = 1; // Adjust this value based on testing (e.g., 1-5 pixels)
-
-      // Mouse move handler with deadzone
       const onMouseMove = (event: MouseEvent) => {
-        const deltaX = event.clientX - lastMouseXRef.current;
+        const deltaX = event.movementX || 0;
+        const deltaY = event.movementY || 0;
 
-        // Only rotate camera if movement exceeds deadzone
-        if (Math.abs(deltaX) > deadzone) {
-          thetaRef.current += deltaX * 0.005; // Sensitivity remains adjustable
-        }
+        yawRef.current -= deltaX * sensitivity;
+        pitchRef.current -= deltaY * sensitivity;
 
-        lastMouseXRef.current = event.clientX;
+        // Clamp pitch between -45° and 45°
+        pitchRef.current = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, pitchRef.current));
       };
 
-      // Add event listener to the canvas
       domElement.addEventListener('mousemove', onMouseMove);
 
-      // Update camera position each frame
-      const updateCameraPosition = (delta: number) => {
+      const updateCamera = (delta: number) => {
         if (!targetRef.current) return;
         const target = targetRef.current as THREE.Vector3;
 
-        const distance = 15; // Distance from player
-        const height = 8;    // Height above player
+        // Compute camera position using spherical coordinates
+        const x = target.x + distance * Math.sin(yawRef.current) * Math.cos(pitchRef.current);
+        const z = target.z + distance * Math.cos(yawRef.current) * Math.cos(pitchRef.current);
+        const y = target.y + height + distance * Math.sin(pitchRef.current);
 
-        // Calculate camera position based on horizontal angle (theta)
-        const x = target.x + Math.sin(thetaRef.current) * distance;
-        const z = target.z + Math.cos(thetaRef.current) * distance;
-        const y = target.y + height;
+        // Directly set camera position rather than using lerp
+        camera.position.set(x, y, z);
 
-        // Smoothly interpolate camera to the target position
-        const targetPosition = new THREE.Vector3(x, y, z);
-        camera.position.lerp(targetPosition, delta * 10); // Increased from 5 to 10 for smoother movement
-        camera.lookAt(target); // Ensure camera always faces the player
+        // Define an offset to look above the character
+        const offset = 4; // Adjust this value to control the upward tilt
+        const lookAtPosition = new THREE.Vector3(target.x, target.y + offset, target.z);
+
+        // Make the camera look at this elevated point instead of directly at the character
+        camera.lookAt(lookAtPosition);
       };
-      updateCameraPosition._id = 'cameraFollow';
 
-      // Register the update function with your game loop
-      const removeUpdate = registerUpdate(updateCameraPosition);
+      updateCamera._id = 'cameraUpdate';
 
-      // Cleanup event listeners and update registration
+      const removeUpdate = registerUpdate(updateCamera);
+
       return () => {
         domElement.removeEventListener('mousemove', onMouseMove);
         removeUpdate();
       };
     };
 
+    // Execute the setup function
     const cleanup = setupCamera();
 
+    // Return a cleanup function for the useEffect
     return () => {
-      cleanup.then(cleanupFn => cleanupFn && cleanupFn());
+      // Handle the Promise correctly
+      if (cleanup) {
+        cleanup.then(cleanupFn => {
+          if (cleanupFn) cleanupFn();
+        });
+      }
     };
   }, [camera, targetRef, domElement, registerUpdate]);
 
-  return null; // No visual rendering, just logic
+  return null;
 } 

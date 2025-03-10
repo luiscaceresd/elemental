@@ -94,6 +94,15 @@ export default function GameCanvas() {
       if (!containerRef.current) return;
       containerRef.current.appendChild(renderer.domElement);
 
+      // Hide the cursor over the canvas for FPS immersion
+      renderer.domElement.style.cursor = 'none';
+
+      // Prevent context menu (right-click menu) on the canvas
+      const preventContextMenu = (event: MouseEvent) => {
+        event.preventDefault();
+      };
+      renderer.domElement.addEventListener('contextmenu', preventContextMenu);
+
       // Studio Ghibli inspired lighting
       // Soft ambient light
       const ambientLight = new THREE.AmbientLight(0x404040, 1);
@@ -184,6 +193,7 @@ export default function GameCanvas() {
         if (containerRef.current && containerRef.current.contains(renderer.domElement)) {
           containerRef.current.removeChild(renderer.domElement);
         }
+        renderer.domElement.removeEventListener('contextmenu', preventContextMenu);
         window.removeEventListener('resize', handleResize);
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
@@ -293,6 +303,7 @@ export default function GameCanvas() {
             camera={cameraRef.current}
             isBendingRef={isBendingRef}
             crosshairPositionRef={crosshairPositionRef}
+            characterPositionRef={characterPositionRef}
           />
 
           {/* Show mobile controls only on mobile devices */}

@@ -44,18 +44,8 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
           const posX = (x / terrainSegments) * terrainWidth - terrainWidth / 2;
           const posZ = (z / terrainSegments) * terrainHeight - terrainHeight / 2;
 
-          // Multi-octave Simplex noise for natural terrain
-          const nx1 = posX / 400; // Large features
-          const nz1 = posZ / 400;
-          const nx2 = posX / 100; // Medium features
-          const nz2 = posZ / 100;
-          const nx3 = posX / 50;  // Small details
-          const nz3 = posZ / 50;
-
-          let heightValue =
-            noise2D(nx1, nz1) * 5.0 +  // Large hills (amplitude 5.0)
-            noise2D(nx2, nz2) * 1.5 +  // Medium bumps (amplitude 1.5) 
-            noise2D(nx3, nz3) * 0.5;   // Small details (amplitude 0.5)
+          // Set base terrain to flat (height 0)
+          let heightValue = 0;
 
           // Create depressions for ponds
           for (const pond of ponds) {

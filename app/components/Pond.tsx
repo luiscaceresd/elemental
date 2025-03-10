@@ -27,9 +27,7 @@ export default function Pond({
   const dropCount = 300; // Increased for better pond coverage
 
   useEffect(() => {
-    const setupPond = async () => {
-      const THREE = await import('three');
-
+    const setupPond = () => {
       // Water drop geometry and material - shared for performance
       const dropGeometry = new THREE.SphereGeometry(0.5, 16, 16);
       const dropMaterial = new THREE.MeshPhysicalMaterial({
@@ -238,10 +236,9 @@ export default function Pond({
         removeUpdate();
       };
     };
-
     const cleanup = setupPond();
-    return () => cleanup.then(cleanupFn => cleanupFn && cleanupFn());
+    return () => cleanup();
   }, [position, size, depth, scene, isBendingRef, crosshairPositionRef, registerUpdate]);
 
   return null;
-} 
+}

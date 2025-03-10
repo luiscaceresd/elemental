@@ -44,16 +44,25 @@ export default function CharacterController({
       velocityRef.current = new THREE.Vector3(0, 0, 0);
       characterPositionRef.current = new THREE.Vector3(0, 1, 5);
 
-      // Create the character mesh
-      const character = new THREE.Mesh(
-        new THREE.SphereGeometry(1, 16, 16),
-        new THREE.MeshBasicMaterial({ color: 0xFF6347 }) // Tomato color
-      );
+      // Create the character mesh - make it visible for third-person view
+      const characterGeometry = new THREE.SphereGeometry(1, 16, 16);
+      const characterMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0xFF6347,  // Tomato color
+        roughness: 0.7,
+        metalness: 0.1
+      });
+      const character = new THREE.Mesh(characterGeometry, characterMaterial);
 
       // Set initial position
       character.position.copy(characterPositionRef.current);
+
+      // Make sure the character is visible for third-person view
+      character.visible = true;
+
       // Enable shadows
       character.castShadow = true;
+      character.receiveShadow = true;
+
       scene.add(character);
       characterRef.current = character;
 
@@ -107,18 +116,16 @@ export default function CharacterController({
         velocityRef.current.x *= friction;
         velocityRef.current.z *= friction;
 
-        // Get the camera's forward and right directions (in the horizontal plane)
-        const cameraDirection = new THREE.Vector3();
-        camera.getWorldDirection(cameraDirection);
-        cameraDirection.y = 0; // Keep movement in horizontal plane
-        cameraDirection.normalize();
+        // Direction from character to camera (horizontal plane)
+        const directionToCamera = new THREE.Vector3().subVectors(camera.position, character.position);
+        directionToCamera.y = 0;
+        directionToCamera.normalize();
 
-        // Right is perpendicular to forward in the horizontal plane
-        const cameraRight = new THREE.Vector3(
-          cameraDirection.z,
-          0,
-          -cameraDirection.x
-        ).normalize();
+        // Forward is opposite to camera direction
+        const characterForward = directionToCamera.clone().negate();
+
+        // Right vector: cross product of forward and up
+        const characterRight = new THREE.Vector3().crossVectors(characterForward, new THREE.Vector3(0, 1, 0)).normalize();
 
         // Calculate move direction based on WASD input
         const moveDirection = new THREE.Vector3(0, 0, 0);
@@ -126,24 +133,23 @@ export default function CharacterController({
         // Get keys state
         const keys = (keysRef as any).current;
 
-        if (keys.w) {
-          moveDirection.add(cameraDirection);
-        }
-        if (keys.s) {
-          moveDirection.sub(cameraDirection);
-        }
-        if (keys.a) {
-          moveDirection.add(cameraRight);
-        }
-        if (keys.d) {
-          moveDirection.sub(cameraRight);
-        }
+        if (keys.w) moveDirection.add(characterForward);  // Forward
+        if (keys.s) moveDirection.sub(characterForward);  // Backward
+        if (keys.a) moveDirection.sub(characterRight);    // Strafe left
+        if (keys.d) moveDirection.add(characterRight);    // Strafe right
 
         // Normalize if we're moving in a direction
         if (moveDirection.lengthSq() > 0) {
           moveDirection.normalize();
           moveDirection.multiplyScalar(moveSpeed * delta);
           velocityRef.current.add(moveDirection);
+
+          // Rotate character to face movement direction
+          character.lookAt(
+            character.position.x + moveDirection.x,
+            character.position.y,
+            character.position.z + moveDirection.z
+          );
         }
 
         // Handle jumping
@@ -173,8 +179,10 @@ export default function CharacterController({
         // Apply y velocity 
         character.position.y += velocityRef.current.y * delta;
 
-        // Debug logging
-        console.log(`Char Y: ${character.position.y.toFixed(2)}, Terrain: ${terrainHeight.toFixed(2)}, Delta: ${(character.position.y - terrainHeight).toFixed(2)}`);
+        // Debug logging occasionally (not every frame to avoid console spam)
+        if (Math.random() < 0.01) {
+          console.log(`Char Y: ${character.position.y.toFixed(2)}, Terrain: ${terrainHeight.toFixed(2)}, Delta: ${(character.position.y - terrainHeight).toFixed(2)}`);
+        }
 
         // Prevent falling through the terrain with a buffer
         const characterHeight = 1; // Offset for character's height
@@ -187,15 +195,6 @@ export default function CharacterController({
         } else {
           // If we're above the terrain by a threshold, we're not on the ground
           onGroundRef.current = (character.position.y - minimumHeight) < 0.1;
-        }
-
-        // Rotate character to face movement direction
-        if (moveDirection.lengthSq() > 0) {
-          character.lookAt(
-            character.position.x + moveDirection.x,
-            character.position.y,
-            character.position.z + moveDirection.z
-          );
         }
 
         // Update position reference and notify parent
