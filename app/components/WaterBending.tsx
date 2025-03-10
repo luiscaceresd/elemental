@@ -33,11 +33,12 @@ export default function WaterBending({
   const bendingEffectRef = useRef<THREE.Mesh | null>(null);
   const bendingParticlesRef = useRef<THREE.Points | null>(null);
   const collectedDropsRef = useRef<number>(0);
-  const visualIndicatorRef = useRef<THREE.Points | null>(null);
+  const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]);
   const freeDropsRef = useRef<{ mesh: THREE.Mesh; velocity: THREE.Vector3 }[]>([]);
   const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 300;
   const REQUIRED_DROPS_TO_FIRE = 45;
+  const MAX_VISIBLE_SPHERES = 50; // Cap for performance
 
   useEffect(() => {
     const updateDisplayCount = () => {
@@ -66,49 +67,23 @@ export default function WaterBending({
       scene.add(glowMesh);
       bendingEffectRef.current = glowMesh;
 
-      // Create particle texture for luminescent effect
-      const canvas = document.createElement('canvas');
-      canvas.width = 64;
-      canvas.height = 64;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-        gradient.addColorStop(0, 'white');
-        gradient.addColorStop(1, 'transparent');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 64, 64);
-      }
-      const waterTexture = new THREE.Texture(canvas);
-      waterTexture.needsUpdate = true;
-
-      // Create water belt particle system
-      const beltParticleCount = 200;
-      const beltPositions = new Float32Array(beltParticleCount * 3);
-      for (let i = 0; i < beltParticleCount; i++) {
-        const angle = (i / beltParticleCount) * Math.PI * 2;
-        const radius = 2 + (Math.random() - 0.5) * 0.5; // Slight radius variation
-        beltPositions[i * 3] = Math.cos(angle) * radius;
-        beltPositions[i * 3 + 1] = 0; // y-position will be animated
-        beltPositions[i * 3 + 2] = Math.sin(angle) * radius;
-      }
-      const beltGeometry = new THREE.BufferGeometry();
-      beltGeometry.setAttribute('position', new THREE.BufferAttribute(beltPositions, 3));
-
-      // Create material with additive blending for glow
-      const beltMaterial = new THREE.PointsMaterial({
-        map: waterTexture,
-        size: 0.3,
-        transparent: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
+      // Shared geometry and material for water belt spheres
+      const sphereGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+      const sphereMaterial = new THREE.MeshPhysicalMaterial({
         color: 0x00BFFF,
+        transparent: true,
+        opacity: 0.9,
+        roughness: 0.1,
+        metalness: 0.2,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        transmission: 0.8,
+        ior: 1.33,
+        emissive: 0x00BFFF, // Fluorescent base color
+        emissiveIntensity: 0.5,
       });
 
-      // Create Points object for water belt
-      const waterBelt = new THREE.Points(beltGeometry, beltMaterial);
-      scene.add(waterBelt);
-      visualIndicatorRef.current = waterBelt;
-
+      // Particle system for bending effect
       const particleCount = 100;
       const particleGeometry = new THREE.BufferGeometry();
       const particlePositions = new Float32Array(particleCount * 3);
@@ -154,11 +129,9 @@ export default function WaterBending({
         }
 
         console.log(`Creating water spear with ${collectedDropsRef.current} drops`);
-
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
 
         const spearGeometry = new THREE.CylinderGeometry(0.4, 0.1, 3.5, 16);
-
         const spearGroup = new THREE.Group();
 
         const spearMaterial = new THREE.MeshPhysicalMaterial({
@@ -281,7 +254,6 @@ export default function WaterBending({
             return;
           }
 
-          // Check for collision with terrain
           const terrain = scene.getObjectByName('terrain');
           if (terrain) {
             const raycaster = new THREE.Raycaster();
@@ -289,7 +261,6 @@ export default function WaterBending({
             const intersects = raycaster.intersectObject(terrain, true);
             const distance = speed * delta;
             if (intersects.length > 0 && intersects[0].distance < distance) {
-              // Collision detected, create water drops at impact point
               createWaterDrops(intersects[0].point);
               scene.remove(spearGroup);
               scene.remove(trail);
@@ -437,10 +408,6 @@ export default function WaterBending({
 
             bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
           }
-
-          if (Math.random() < 0.01) {
-            console.log('Still bending:', isBendingRef.current, 'at', crosshairPositionRef.current, 'drops:', collectedDropsRef.current);
-          }
         } else {
           if (bendingEffectRef.current) {
             (bendingEffectRef.current.material as THREE.MeshBasicMaterial).opacity = 0;
@@ -457,45 +424,69 @@ export default function WaterBending({
           }
         }
 
-        // Update visual indicator water belt
-        if (visualIndicatorRef.current && characterPositionRef?.current) {
-          const waterBelt = visualIndicatorRef.current;
-          waterBelt.position.copy(characterPositionRef.current);
-          waterBelt.position.y += 1.2; // Position belt around character waist
-          waterBelt.rotation.y += delta * 0.5; // Slow rotation
+        // Update water belt with dynamic spheres
+        if (characterPositionRef?.current) {
+          const currentDrops = collectedDropsRef.current;
+          const currentSpheres = waterBeltSpheresRef.current.length;
+          const waterRatio = Math.min(1, currentDrops / MAX_WATER_DROPS); // 0 to 1
+          const visibleSpheres = Math.min(currentDrops, MAX_VISIBLE_SPHERES); // Cap sphere count
 
-          const time = Date.now() * 0.001;
-          const waterRatio = collectedDropsRef.current / MAX_WATER_DROPS;
+          // Adjust sphere count
+          if (currentDrops > 0) {
+            if (currentSpheres < visibleSpheres) {
+              for (let i = currentSpheres; i < visibleSpheres; i++) {
+                const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone()); // Clone material for individual animation
+                sphere.castShadow = true;
+                scene.add(sphere);
+                waterBeltSpheresRef.current.push(sphere);
+              }
+            } else if (currentSpheres > visibleSpheres) {
+              while (waterBeltSpheresRef.current.length > visibleSpheres) {
+                const sphere = waterBeltSpheresRef.current.pop();
+                if (sphere) {
+                  scene.remove(sphere);
+                  (sphere.material as THREE.Material).dispose();
+                }
+              }
+            }
 
-          // Scale particle size based on collected water - larger base size
-          (waterBelt.material as THREE.PointsMaterial).size = 0.3 + waterRatio * 0.5;
+            // Update belt appearance based on ammo
+            const baseRadius = 1.5 + waterRatio * 0.5; // Radius grows from 1.5 to 2 with ammo
+            const time = Date.now() * 0.001;
 
-          // Add wave-like vertical motion and pulsating radius to belt particles
-          const beltPositions = waterBelt.geometry.attributes.position.array as Float32Array;
-          const baseRadius = 2;
-          const pulse = Math.sin(time) * 0.2; // Pulsating effect
+            waterBeltSpheresRef.current.forEach((sphere, i) => {
+              const totalSpheres = waterBeltSpheresRef.current.length;
+              const angle = (i / totalSpheres) * Math.PI * 2;
+              // Position spheres in a ring
+              if (characterPositionRef.current) {
+                sphere.position.copy(characterPositionRef.current);
+                sphere.position.x += Math.cos(angle + time * 0.5) * baseRadius;
+                sphere.position.y += 1.2 + Math.sin(time + angle * 5) * 0.2;
+                sphere.position.z += Math.sin(angle + time * 0.5) * baseRadius;
+              }
 
-          for (let i = 0; i < beltPositions.length / 3; i++) {
-            const angle = (i / (beltPositions.length / 3)) * Math.PI * 2;
-            // Vertical wave motion
-            beltPositions[i * 3 + 1] = Math.sin(time + angle * 5) * 0.2;
-            // Pulsating radius
-            beltPositions[i * 3] = Math.cos(angle) * (baseRadius + pulse);
-            beltPositions[i * 3 + 2] = Math.sin(angle) * (baseRadius + pulse);
+              // Fluorescent animation: pulse emissive intensity
+              const material = sphere.material as THREE.MeshPhysicalMaterial;
+              const pulse = Math.sin(time * 2 + i * 0.5) * 0.5 + 0.5; // 0 to 1
+              material.emissiveIntensity = 0.5 + pulse * (0.5 + waterRatio); // Stronger glow with more ammo
+              material.opacity = 0.7 + pulse * 0.2; // Slight opacity pulse
+            });
+          } else {
+            // Remove all spheres if no water
+            while (waterBeltSpheresRef.current.length > 0) {
+              const sphere = waterBeltSpheresRef.current.pop();
+              if (sphere) {
+                scene.remove(sphere);
+                (sphere.material as THREE.Material).dispose();
+              }
+            }
           }
-          waterBelt.geometry.attributes.position.needsUpdate = true;
-
-          // Debug positioning - uncomment if needed
-          // if (Math.random() < 0.01) {
-          //   console.log('Character Y:', characterPositionRef.current.y, 'Belt Y:', waterBelt.position.y);
-          // }
         }
 
-        // Handle free water drops
+        // Handle free water drops (unchanged)
         const dropsToRemove: { mesh: THREE.Mesh; velocity: THREE.Vector3 }[] = [];
 
         for (const drop of freeDropsRef.current) {
-          // Apply attraction when bending
           if (isBendingRef.current && crosshairPositionRef.current) {
             const direction = crosshairPositionRef.current.clone().sub(drop.mesh.position);
             const distance = direction.length();
@@ -506,27 +497,22 @@ export default function WaterBending({
             }
           }
 
-          // Apply velocity and gravity
           drop.mesh.position.add(drop.velocity.clone().multiplyScalar(delta));
           let targetY = 0;
 
-          // Get terrain height if available
           if (typeof window !== 'undefined' && (window as any).getTerrainHeight) {
             targetY = (window as any).getTerrainHeight(drop.mesh.position.x, drop.mesh.position.z);
           }
 
-          // Apply gravity if above ground
           if (drop.mesh.position.y > targetY + 0.1) {
-            drop.velocity.y -= 9.8 * delta; // Apply gravity
+            drop.velocity.y -= 9.8 * delta;
           } else {
-            // Ground friction
             drop.velocity.x *= 0.9;
             drop.velocity.z *= 0.9;
             drop.velocity.y = 0;
             drop.mesh.position.y = targetY + 0.1;
           }
 
-          // Check for collection
           if (isBendingRef.current && crosshairPositionRef.current) {
             const distance = drop.mesh.position.distanceTo(crosshairPositionRef.current);
             if (distance < 0.8 && collectedDropsRef.current < MAX_WATER_DROPS) {
@@ -537,7 +523,6 @@ export default function WaterBending({
           }
         }
 
-        // Remove collected drops
         if (dropsToRemove.length > 0) {
           freeDropsRef.current = freeDropsRef.current.filter(d => !dropsToRemove.includes(d));
           dropsToRemove.forEach(drop => {
@@ -552,14 +537,16 @@ export default function WaterBending({
       return () => {
         if (bendingEffectRef.current) scene.remove(bendingEffectRef.current);
         if (bendingParticlesRef.current) scene.remove(bendingParticlesRef.current);
-        if (visualIndicatorRef.current) {
-          scene.remove(visualIndicatorRef.current);
-          visualIndicatorRef.current.geometry.dispose();
-          (visualIndicatorRef.current.material as THREE.PointsMaterial).map?.dispose();
-          (visualIndicatorRef.current.material as THREE.PointsMaterial).dispose();
-        }
 
-        // Cleanup free water drops
+        // Cleanup water belt spheres
+        waterBeltSpheresRef.current.forEach(sphere => {
+          scene.remove(sphere);
+          (sphere.material as THREE.Material).dispose();
+        });
+        waterBeltSpheresRef.current = [];
+        sphereGeometry.dispose();
+        sphereMaterial.dispose();
+
         freeDropsRef.current.forEach(drop => {
           scene.remove(drop.mesh);
           drop.mesh.geometry.dispose();
@@ -592,4 +579,4 @@ export default function WaterBending({
       requiredWater={REQUIRED_DROPS_TO_FIRE}
     />
   );
-} 
+}
