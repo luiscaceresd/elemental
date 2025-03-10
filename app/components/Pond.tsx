@@ -3,6 +3,11 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
+// Define interface for window with getTerrainHeight
+interface WindowWithTerrain extends Window {
+  getTerrainHeight?: (x: number, z: number) => number;
+}
+
 interface PondProps {
   position: THREE.Vector3;
   size: number; // Diameter of the pond
@@ -58,8 +63,11 @@ export default function Pond({
 
         // Get terrain height at this position
         let terrainY = 0;
-        if (typeof window !== 'undefined' && (window as any).getTerrainHeight) {
-          terrainY = (window as any).getTerrainHeight(x, z);
+        if (typeof window !== 'undefined') {
+          const winWithTerrain = window as WindowWithTerrain;
+          if (winWithTerrain.getTerrainHeight) {
+            terrainY = winWithTerrain.getTerrainHeight(x, z);
+          }
         }
 
         // Make sure drops start lower in the depression
@@ -95,8 +103,6 @@ export default function Pond({
 
         console.log('Bending state:', isBendingRef.current); // Debug log
 
-        const activeDrops = drops.filter(drop => drop.visible);
-
         // Process each drop
         for (let i = 0; i < drops.length; i++) {
           if (!drops[i].visible) continue;
@@ -119,8 +125,11 @@ export default function Pond({
           // Apply gravity when not bending - water should settle at bottom of depression
           if (!isBendingRef.current) {
             let targetY = 0;
-            if (typeof window !== 'undefined' && (window as any).getTerrainHeight) {
-              targetY = (window as any).getTerrainHeight(drops[i].position.x, drops[i].position.z);
+            if (typeof window !== 'undefined') {
+              const winWithTerrain = window as WindowWithTerrain;
+              if (winWithTerrain.getTerrainHeight) {
+                targetY = winWithTerrain.getTerrainHeight(drops[i].position.x, drops[i].position.z);
+              }
             }
 
             // Apply stronger gravity
@@ -205,8 +214,11 @@ export default function Pond({
               const z = position.z + Math.sin(angle) * distanceFromCenter;
 
               let terrainY = 0;
-              if (typeof window !== 'undefined' && (window as any).getTerrainHeight) {
-                terrainY = (window as any).getTerrainHeight(x, z);
+              if (typeof window !== 'undefined') {
+                const winWithTerrain = window as WindowWithTerrain;
+                if (winWithTerrain.getTerrainHeight) {
+                  terrainY = winWithTerrain.getTerrainHeight(x, z);
+                }
               }
 
               drops[i].position.set(x, terrainY + 0.1, z);

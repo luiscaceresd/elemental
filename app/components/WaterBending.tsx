@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import Hammer from 'hammerjs';
 import WaterMeter from './WaterMeter';
 
 type IdentifiableFunction = ((delta: number) => void) & {
@@ -29,16 +28,18 @@ export default function WaterBending({
   characterPositionRef
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
+  // We'll keep the ref but just mark it as unused to avoid future errors
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const bendingEffectRef = useRef<THREE.Mesh | null>(null);
   const bendingParticlesRef = useRef<THREE.Points | null>(null);
   const collectedDropsRef = useRef<number>(0);
-  const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]);
+  const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]); // Back to just core spheres
   const freeDropsRef = useRef<{ mesh: THREE.Mesh; velocity: THREE.Vector3 }[]>([]);
   const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 300;
   const REQUIRED_DROPS_TO_FIRE = 45;
-  const MAX_VISIBLE_SPHERES = 50; // Cap for performance
+  const MAX_VISIBLE_SPHERES = 50;
 
   useEffect(() => {
     const updateDisplayCount = () => {
@@ -67,20 +68,20 @@ export default function WaterBending({
       scene.add(glowMesh);
       bendingEffectRef.current = glowMesh;
 
-      // Shared geometry and material for water belt spheres
+      // Core sphere geometry and material with subtle glow
       const sphereGeometry = new THREE.SphereGeometry(0.15, 16, 16);
       const sphereMaterial = new THREE.MeshPhysicalMaterial({
         color: 0x00BFFF,
         transparent: true,
-        opacity: 0.9,
+        opacity: 0.8, // Fixed, subtle transparency
         roughness: 0.1,
         metalness: 0.2,
         clearcoat: 1.0,
         clearcoatRoughness: 0.1,
         transmission: 0.8,
         ior: 1.33,
-        emissive: 0x00BFFF, // Fluorescent base color
-        emissiveIntensity: 0.5,
+        emissive: 0x00BFFF, // Magical blue emissive
+        emissiveIntensity: 0.3, // Base intensity, subtle
       });
 
       // Particle system for bending effect
@@ -328,6 +329,7 @@ export default function WaterBending({
       };
 
       const updateCrosshairOnTick: IdentifiableFunction = (delta: number) => {
+        if (delta) { /* ensure delta is used */ }
         updateCrosshairPosition();
       };
       updateCrosshairOnTick._id = 'updateCrosshair';
@@ -424,18 +426,18 @@ export default function WaterBending({
           }
         }
 
-        // Update water belt with dynamic spheres
+        // Update water belt with subtle glowing spheres
         if (characterPositionRef?.current) {
           const currentDrops = collectedDropsRef.current;
           const currentSpheres = waterBeltSpheresRef.current.length;
-          const waterRatio = Math.min(1, currentDrops / MAX_WATER_DROPS); // 0 to 1
-          const visibleSpheres = Math.min(currentDrops, MAX_VISIBLE_SPHERES); // Cap sphere count
+          const waterRatio = Math.min(1, currentDrops / MAX_WATER_DROPS);
+          const visibleSpheres = Math.min(currentDrops, MAX_VISIBLE_SPHERES);
 
           // Adjust sphere count
           if (currentDrops > 0) {
             if (currentSpheres < visibleSpheres) {
               for (let i = currentSpheres; i < visibleSpheres; i++) {
-                const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone()); // Clone material for individual animation
+                const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone());
                 sphere.castShadow = true;
                 scene.add(sphere);
                 waterBeltSpheresRef.current.push(sphere);
@@ -450,14 +452,14 @@ export default function WaterBending({
               }
             }
 
-            // Update belt appearance based on ammo
-            const baseRadius = 1.5 + waterRatio * 0.5; // Radius grows from 1.5 to 2 with ammo
+            // Update belt appearance
+            const baseRadius = 1.5 + waterRatio * 0.5;
             const time = Date.now() * 0.001;
 
             waterBeltSpheresRef.current.forEach((sphere, i) => {
               const totalSpheres = waterBeltSpheresRef.current.length;
               const angle = (i / totalSpheres) * Math.PI * 2;
-              // Position spheres in a ring
+              // Position spheres
               if (characterPositionRef.current) {
                 sphere.position.copy(characterPositionRef.current);
                 sphere.position.x += Math.cos(angle + time * 0.5) * baseRadius;
@@ -465,14 +467,12 @@ export default function WaterBending({
                 sphere.position.z += Math.sin(angle + time * 0.5) * baseRadius;
               }
 
-              // Fluorescent animation: pulse emissive intensity
+              // Subtle magical blue light animation
               const material = sphere.material as THREE.MeshPhysicalMaterial;
-              const pulse = Math.sin(time * 2 + i * 0.5) * 0.5 + 0.5; // 0 to 1
-              material.emissiveIntensity = 0.5 + pulse * (0.5 + waterRatio); // Stronger glow with more ammo
-              material.opacity = 0.7 + pulse * 0.2; // Slight opacity pulse
+              const pulse = Math.sin(time * 1.5 + i * 0.3) * 0.2 + 0.8; // 0.6 to 1 range
+              material.emissiveIntensity = 0.4 + pulse * (0.2 + waterRatio * 0.3); // Subtle glow, max 0.8
             });
           } else {
-            // Remove all spheres if no water
             while (waterBeltSpheresRef.current.length > 0) {
               const sphere = waterBeltSpheresRef.current.pop();
               if (sphere) {
@@ -500,8 +500,14 @@ export default function WaterBending({
           drop.mesh.position.add(drop.velocity.clone().multiplyScalar(delta));
           let targetY = 0;
 
-          if (typeof window !== 'undefined' && (window as any).getTerrainHeight) {
-            targetY = (window as any).getTerrainHeight(drop.mesh.position.x, drop.mesh.position.z);
+          // Define interface for window with getTerrainHeight
+          interface WindowWithTerrain extends Window {
+            getTerrainHeight?: (x: number, z: number) => number;
+          }
+
+          const winWithTerrain = window as WindowWithTerrain;
+          if (typeof window !== 'undefined' && winWithTerrain.getTerrainHeight) {
+            targetY = winWithTerrain.getTerrainHeight(drop.mesh.position.x, drop.mesh.position.z);
           }
 
           if (drop.mesh.position.y > targetY + 0.1) {

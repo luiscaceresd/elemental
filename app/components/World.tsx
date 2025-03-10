@@ -325,7 +325,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       const removeUpdate = registerUpdate(update);
 
       // Export terrain height function for other components
-      // @ts-ignore
+      // @ts-expect-error - Property 'getTerrainHeight' does not exist on Window interface
       window.getTerrainHeight = (x: number, z: number) => {
         return getTerrainHeightAt(x, z, terrainWidth, terrainHeight, terrainSegments, heightmap);
       };
@@ -383,7 +383,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
         skyGeometry.dispose();
         skyMaterial.dispose();
         removeUpdate();
-        // @ts-ignore
+        // @ts-expect-error - Property 'getTerrainHeight' does not exist on Window interface
         delete window.getTerrainHeight;
       };
     };

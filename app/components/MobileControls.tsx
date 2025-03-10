@@ -14,7 +14,7 @@ export default function MobileControls({
   onJump
 }: MobileControlsProps) {
   const joystickZoneRef = useRef<HTMLDivElement>(null);
-  const nippleInstanceRef = useRef<any>(null);
+  const nippleInstanceRef = useRef<unknown>(null);
 
   // This useEffect is necessary for nipplejs integration
   useEffect(() => {
@@ -49,7 +49,11 @@ export default function MobileControls({
 
       return () => {
         if (nippleInstanceRef.current) {
-          nippleInstanceRef.current.destroy();
+          // Check if destroy method exists
+          const nippleInstance = nippleInstanceRef.current as { destroy?: () => void };
+          if (nippleInstance.destroy) {
+            nippleInstance.destroy();
+          }
         }
       };
     };

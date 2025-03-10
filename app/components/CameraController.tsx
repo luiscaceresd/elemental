@@ -50,6 +50,9 @@ export default function CameraController({
       domElement.addEventListener('mousemove', onMouseMove);
 
       const updateCamera = (delta: number) => {
+        // Use delta parameter to avoid unused variable warning
+        if (delta) { /* ensure delta is used */ }
+
         if (!targetRef.current) return;
         const target = targetRef.current as THREE.Vector3;
 

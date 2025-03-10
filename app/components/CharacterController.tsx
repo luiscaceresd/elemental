@@ -80,9 +80,17 @@ export default function CharacterController({
       const getTerrainHeight = (x: number, z: number): number => {
         let height = 0;
 
-        // First try using the World's getTerrainHeight function
-        if (typeof window !== 'undefined' && (window as any).getTerrainHeight) {
-          height = (window as any).getTerrainHeight(x, z);
+        // Define interface for window with getTerrainHeight
+        interface WindowWithTerrain extends Window {
+          getTerrainHeight?: (x: number, z: number) => number;
+        }
+
+        // Use proper typing
+        if (typeof window !== 'undefined') {
+          const winWithTerrain = window as WindowWithTerrain;
+          if (winWithTerrain.getTerrainHeight) {
+            height = winWithTerrain.getTerrainHeight(x, z);
+          }
         }
 
         // Then use raycasting as a backup/verification
@@ -130,8 +138,15 @@ export default function CharacterController({
         // Calculate move direction based on WASD input
         const moveDirection = new THREE.Vector3(0, 0, 0);
 
-        // Get keys state
-        const keys = (keysRef as any).current;
+        // Define keys type and get keys state
+        type KeysType = {
+          w: boolean;
+          a: boolean;
+          s: boolean;
+          d: boolean;
+          ' ': boolean;
+        };
+        const keys = (keysRef as React.RefObject<KeysType>).current || { w: false, a: false, s: false, d: false, ' ': false };
 
         if (keys.w) moveDirection.add(characterForward);  // Forward
         if (keys.s) moveDirection.sub(characterForward);  // Backward

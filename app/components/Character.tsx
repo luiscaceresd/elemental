@@ -75,8 +75,15 @@ export default function Character({ scene, keysRef, registerUpdate, camera }: Ch
         // Calculate move direction based on WASD input
         const moveDirection = new THREE.Vector3(0, 0, 0);
 
-        // Use type assertion without MutableRefObject
-        const keys = (keysRef as any).current;
+        // Use proper typing for keys
+        type KeysType = {
+          w: boolean;
+          a: boolean;
+          s: boolean;
+          d: boolean;
+          ' ': boolean;
+        };
+        const keys = (keysRef as React.RefObject<KeysType>).current || { w: false, a: false, s: false, d: false, ' ': false };
 
         if (keys.w) {
           moveDirection.add(cameraDirection);
