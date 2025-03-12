@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
 
 type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string
@@ -30,7 +31,7 @@ export default function CameraController({
   height = 2, // Default height
   isMobile = false
 }: CameraControllerProps) {
-  const controlsRef = useRef<any>(null);
+  const controlsRef = useRef<PointerLockControls | null>(null);
   const controlObjectRef = useRef<THREE.Object3D | null>(null);
   const cameraLockedRef = useRef(lockCamera);
 
@@ -136,16 +137,16 @@ export default function CameraController({
         // Desktop setup with PointerLockControls
         const controls = new PointerLockControls(camera, domElement);
 
-        // Try to access and modify internal pointer speed property
+        // Store controls in ref for later use
+        controlsRef.current = controls;
+
+        // Set pointer speed for sensitivity
         try {
-          // Using any type to bypass TypeScript's property checking
-          const controlsAny = controls as any;
-          controlsAny.pointerSpeed = sensitivity;
-        } catch (e) {
+          // Use proper type casting for the controls object 
+          (controls as PointerLockControls & { pointerSpeed: number }).pointerSpeed = sensitivity;
+        } catch {
           console.warn('Could not set pointer speed, using default sensitivity');
         }
-
-        controlsRef.current = controls;
 
         // Request pointer lock on click
         const onClick = () => {
@@ -162,9 +163,7 @@ export default function CameraController({
           } else {
             console.log('Pointer unlocked');
             // Ensure controls are unlocked when pointer lock is exited
-            if (controlsRef.current) {
-              controlsRef.current.unlock();
-            }
+            controls.unlock();
           }
         };
         document.addEventListener('pointerlockchange', onPointerLockChange);
@@ -172,9 +171,7 @@ export default function CameraController({
         cleanupFunctions.push(() => {
           domElement.removeEventListener('click', onClick);
           document.removeEventListener('pointerlockchange', onPointerLockChange);
-          if (controlsRef.current) {
-            controlsRef.current.dispose();
-          }
+          controls.dispose();
         });
       }
 
@@ -183,15 +180,40 @@ export default function CameraController({
       const heightOffsetFromCharacter = height;
 
       // Update function to position camera (same for both mobile and desktop)
-      const updateCamera: IdentifiableFunction = (delta: number) => {
-        if (!targetRef.current || !controlObjectRef.current || cameraLockedRef.current) return;
+      const updateCamera: IdentifiableFunction = () => {
+        if (!targetRef.current) {
+          console.warn("Camera target is null - cannot update camera position");
+          return;
+        }
 
-        // Update control object position to follow character
+        if (!controlObjectRef.current) {
+          console.warn("Camera control object is null - cannot update camera position");
+          return;
+        }
+
+        if (cameraLockedRef.current) {
+          return;
+        }
+
+        // CRITICAL FIX: Update control object position to follow character immediately
         controlObjectRef.current.position.copy(targetRef.current);
+
+        // Debug camera position
+        if (Math.random() < 0.01) {
+          console.warn('Camera Debug:');
+          console.warn('- Target at:', targetRef.current.clone());
+          console.warn('- Camera position:', camera.position.clone());
+        }
 
         // Get the direction the camera is facing from controls
         const direction = new THREE.Vector3(0, 0, -1);
         camera.getWorldDirection(direction);
+
+        // We want the camera to position itself behind the character
+        // Since we rotated the character to face -Z, we need to adjust our camera logic
+
+        // Calculate camera offset based on current camera orientation
+        // We need to negate the direction to position the camera behind the character
         direction.negate(); // Reverse direction to position camera behind character
 
         // Create a horizontal direction (for left/right positioning)
@@ -204,21 +226,42 @@ export default function CameraController({
 
         // Calculate camera offset - using a spring arm style approach
         // This is similar to how Unreal Engine handles third-person cameras
-        const horizontalDistance = distanceFromCharacter * Math.cos(verticalAngle);
+        // Increase the distance to ensure character is visible
+        const horizontalDistance = (distanceFromCharacter + 2) * Math.cos(verticalAngle);
 
         // Add a fixed height offset to prevent top-down view
         // This ensures camera stays behind character, not directly above
-        const heightOffset = heightOffsetFromCharacter + distanceFromCharacter * Math.sin(verticalAngle);
+        // Raise height slightly for better view of character
+        const heightOffset = (heightOffsetFromCharacter + 1) + distanceFromCharacter * Math.sin(verticalAngle);
 
-        // Calculate final offset
+        // Calculate final offset - we're placing the camera BEHIND the character's new forward direction
         const offsetX = horizontalDir.x * horizontalDistance;
         const offsetY = heightOffset; // Fixed height plus vertical angle component
         const offsetZ = horizontalDir.z * horizontalDistance;
 
         const offset = new THREE.Vector3(offsetX, offsetY, offsetZ);
 
-        // Position camera behind character based on camera direction
-        camera.position.copy(targetRef.current).add(offset);
+        // Create target position - this puts the camera behind the character
+        const targetPosition = targetRef.current.clone().add(offset);
+
+        // Smooth camera movement with lerp
+        // Use a faster lerp value (0.2-0.3) for more responsive feel
+        camera.position.lerp(targetPosition, 0.25);
+
+        // Look at character (slightly above character's base)
+        const lookTarget = new THREE.Vector3(
+          targetRef.current.x,
+          targetRef.current.y + 1.5, // Look at head level
+          targetRef.current.z
+        );
+
+        // Only adjust lookAt for mobile (desktop uses PointerLockControls)
+        if (isMobile) {
+          // For mobile, adjust lookAt only when not actively rotating with touch
+          if (cameraControlTouchId.current === null) {
+            camera.lookAt(lookTarget);
+          }
+        }
       };
 
       updateCamera._id = 'pointerLockCameraUpdate';

@@ -1,174 +1,235 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { AnimationMixer, AnimationAction, AnimationClip } from 'three';
+import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader';
 
-// Add a type for functions with an identifier to match GameCanvas
+// Add a type for identifiable functions as used in other components
 type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string
 };
 
 interface CharacterProps {
   scene: THREE.Scene;
-  keysRef: React.Ref<{
-    w: boolean;
-    a: boolean;
-    s: boolean;
-    d: boolean;
-    ' ': boolean; // Space key
-  }>;
-  registerUpdate: (updateFn: IdentifiableFunction) => () => void;
-  camera: THREE.Camera;
+  onModelLoaded?: (model: THREE.Group) => void;
+  position?: THREE.Vector3;
+  scale?: THREE.Vector3;
+  registerUpdate?: (updateFn: IdentifiableFunction) => () => void;
 }
 
-export default function Character({ scene, keysRef, registerUpdate, camera }: CharacterProps) {
-  const characterRef = useRef<THREE.Mesh | null>(null);
-  const velocityRef = useRef(new THREE.Vector3(0, 0, 0));
-  const onGroundRef = useRef(true);
+export default function Character({
+  scene,
+  onModelLoaded,
+  position = new THREE.Vector3(0, 0, 0),
+  scale = new THREE.Vector3(1, 1, 1),
+  registerUpdate
+}: CharacterProps) {
+  const modelRef = useRef<THREE.Group | null>(null);
+  const mixerRef = useRef<AnimationMixer | null>(null);
+  const actionsRef = useRef<{ [key: string]: AnimationAction }>({});
+  const [isLoaded, setIsLoaded] = useState(false);
 
-  // This useEffect is necessary for THREE.js integration and cleanup
   useEffect(() => {
-    // Import Three.js dynamically
-    const setupCharacter = async () => {
-      const THREE = await import('three');
+    // Check if we already have a model loaded to prevent duplicates
+    if (modelRef.current) {
+      return; // Don't load again if we already have a model
+    }
 
-      // Create the character mesh
-      const character = new THREE.Mesh(
-        new THREE.SphereGeometry(1, 16, 16),
-        new THREE.MeshBasicMaterial({ color: 0xFF6347 }) // Tomato color
-      );
-      character.position.set(0, 1, 5);
-      scene.add(character);
-      characterRef.current = character;
+    const loadModel = async () => {
+      try {
+        // Remove any existing character models from the scene
+        scene.children.forEach(child => {
+          if (child.name === 'characterModel') {
+            scene.remove(child);
+          }
+        });
 
-      // Physics constants
-      const moveSpeed = 10;
-      const jumpForce = 15;
-      const gravity = 30;
-      const friction = 0.9;
+        // Create DRACOLoader
+        const dracoLoader = new DRACOLoader();
+        // Specify the path to the Draco decoder (using the default from three.js CDN)
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+        // Optional: For better performance, specify that we want to use JS decoder
+        dracoLoader.setDecoderConfig({ type: 'js' });
 
-      // Set up a simple ground detection ray
-      const raycaster = new THREE.Raycaster();
-      const downDirection = new THREE.Vector3(0, -1, 0);
+        // Create GLTFLoader and attach DRACOLoader
+        const loader = new GLTFLoader();
+        loader.setDRACOLoader(dracoLoader);
 
-      // Define the update function for physics-based movement
-      const update: IdentifiableFunction = (delta: number) => {
-        if (!character) return;
-
-        // Apply friction to slow down when not pressing movement keys
-        velocityRef.current.x *= friction;
-        velocityRef.current.z *= friction;
-
-        // Get the camera's forward and right directions (in the horizontal plane)
-        const cameraDirection = new THREE.Vector3();
-        camera.getWorldDirection(cameraDirection);
-        cameraDirection.y = 0; // Keep movement in horizontal plane
-        cameraDirection.normalize();
-
-        // Right is perpendicular to forward in the horizontal plane
-        const cameraRight = new THREE.Vector3(
-          cameraDirection.z,
-          0,
-          -cameraDirection.x
-        ).normalize();
-
-        // Calculate move direction based on WASD input
-        const moveDirection = new THREE.Vector3(0, 0, 0);
-
-        // Use proper typing for keys
-        type KeysType = {
-          w: boolean;
-          a: boolean;
-          s: boolean;
-          d: boolean;
-          ' ': boolean;
-        };
-        const keys = (keysRef as React.RefObject<KeysType>).current || { w: false, a: false, s: false, d: false, ' ': false };
-
-        if (keys.w) {
-          moveDirection.add(cameraDirection);
-        }
-        if (keys.s) {
-          moveDirection.sub(cameraDirection);
-        }
-        if (keys.a) {
-          moveDirection.sub(cameraRight);
-        }
-        if (keys.d) {
-          moveDirection.add(cameraRight);
-        }
-
-        // Normalize if we're moving in a direction
-        if (moveDirection.lengthSq() > 0) {
-          moveDirection.normalize();
-          moveDirection.multiplyScalar(moveSpeed * delta);
-          velocityRef.current.add(moveDirection);
-        }
-
-        // Check if we're on the ground
-        raycaster.set(character.position.clone(), downDirection);
-        const intersects = raycaster.intersectObjects(scene.children, false);
-        onGroundRef.current = intersects.length > 0 && intersects[0].distance < 1.1;
-
-        // Handle jumping
-        if (keys[' '] && onGroundRef.current) {
-          velocityRef.current.y = jumpForce;
-          onGroundRef.current = false;
-        }
-
-        // Apply gravity if we're in the air
-        if (!onGroundRef.current) {
-          velocityRef.current.y -= gravity * delta;
-        } else {
-          velocityRef.current.y = Math.max(0, velocityRef.current.y);
-        }
-
-        // Update position based on velocity
-        character.position.x += velocityRef.current.x * delta;
-        character.position.y += velocityRef.current.y * delta;
-        character.position.z += velocityRef.current.z * delta;
-
-        // Prevent falling through the ground
-        if (character.position.y < 1) {
-          character.position.y = 1;
-          velocityRef.current.y = 0;
-          onGroundRef.current = true;
-        }
-
-        // Rotate character to face movement direction
-        if (moveDirection.lengthSq() > 0) {
-          character.lookAt(
-            character.position.x + moveDirection.x,
-            character.position.y,
-            character.position.z + moveDirection.z
+        // Load the character model
+        const gltf = await new Promise<GLTF>((resolve, reject) => {
+          loader.load(
+            '/models/character.glb',
+            (gltf) => resolve(gltf),
+            (progress) => {
+              // Optional: You can log or handle progress here
+              console.log(`Loading model: ${Math.round(progress.loaded / progress.total * 100)}%`);
+            },
+            (error) => reject(error)
           );
+        });
+
+        // Set up the model
+        const model = gltf.scene;
+
+        // Give the model a name for identification
+        model.name = 'characterModel';
+
+        // Position and scale the model
+        model.position.copy(position);
+        model.scale.copy(scale);
+
+        // Adjust character orientation to align with movement direction
+        // In standard ThreeJS, forward direction is -Z
+        // But our movement is calculated relative to the camera direction
+        // We rotate 180 degrees to face the character forward properly
+        model.rotation.y = Math.PI;
+
+        console.log('Character model orientation set to align with movement direction');
+
+        // Ensure all materials and meshes are visible
+        let meshCount = 0;
+        model.traverse((node) => {
+          if (node instanceof THREE.Mesh) {
+            meshCount++;
+            node.castShadow = true;
+            node.receiveShadow = true;
+            node.visible = true;
+
+            // Check and fix material visibility
+            if (node.material) {
+              const materials = Array.isArray(node.material) ? node.material : [node.material];
+              materials.forEach(material => {
+                material.visible = true;
+                material.transparent = false;
+                material.opacity = 1.0;
+                material.needsUpdate = true;
+              });
+            }
+          }
+        });
+
+        console.log(`Character model has ${meshCount} visible meshes`);
+
+        // Log the model hierarchy for debugging
+        console.log('Character model hierarchy:', model);
+
+        // Store the model in a ref for later use
+        modelRef.current = model;
+
+        // Add the model to the scene
+        scene.add(model);
+
+        // Set up animations if they exist
+        if (gltf.animations && gltf.animations.length > 0) {
+          const mixer = new THREE.AnimationMixer(model);
+          mixerRef.current = mixer;
+
+          console.log('Available animations:', gltf.animations.map(a => a.name));
+
+          // Create animation actions and store them in the ref
+          gltf.animations.forEach((clip: AnimationClip) => {
+            const action = mixer.clipAction(clip);
+            actionsRef.current[clip.name] = action;
+          });
+
+          // Play the idle animation by default if it exists
+          if (actionsRef.current['idle']) {
+            actionsRef.current['idle'].play();
+          } else if (gltf.animations.length > 0) {
+            // If no 'idle' animation, play the first available animation
+            const firstAnimName = gltf.animations[0].name;
+            actionsRef.current[firstAnimName].play();
+            console.log(`Playing animation: ${firstAnimName}`);
+          }
         }
-      };
 
-      // Add identifier
-      update._id = 'characterUpdate';
-
-      // Register the update function with the parent
-      const removeUpdate = registerUpdate(update);
-
-      // Return cleanup function
-      return () => {
-        if (character) {
-          scene.remove(character);
+        // Notify parent that model is loaded
+        if (onModelLoaded) {
+          onModelLoaded(model);
         }
-        removeUpdate();
-      };
+
+        setIsLoaded(true);
+        console.log('Character model loaded successfully');
+      } catch (error) {
+        console.error('Error loading character model:', error);
+      }
     };
 
-    // Initialize character
-    const cleanup = setupCharacter();
+    loadModel();
+
+    // Cleanup function
+    return () => {
+      if (modelRef.current) {
+        scene.remove(modelRef.current);
+        modelRef.current = null;
+
+        // Also clear the mixer and actions
+        mixerRef.current = null;
+        actionsRef.current = {};
+      }
+
+      // Dispose of the DRACO loader when component unmounts
+      const dracoLoader = new DRACOLoader();
+      dracoLoader.dispose();
+    };
+  }, [scene, onModelLoaded, position, scale]);
+
+  // Method to play a specific animation
+  const playAnimation = (animationName: string, fadeInTime: number = 0.5) => {
+    if (!mixerRef.current || !actionsRef.current[animationName]) {
+      console.warn(`Animation ${animationName} not found`);
+      return;
+    }
+
+    // Fade out all current animations
+    Object.values(actionsRef.current).forEach(action => {
+      if (action.isRunning()) {
+        action.fadeOut(fadeInTime);
+      }
+    });
+
+    // Fade in the new animation
+    const action = actionsRef.current[animationName];
+    action.reset().fadeIn(fadeInTime).play();
+  };
+
+  // Update the animation mixer in the game loop
+  useEffect(() => {
+    if (!scene || !registerUpdate) return;
+
+    // Create animation update function
+    const update: IdentifiableFunction = (delta: number) => {
+      if (mixerRef.current) {
+        mixerRef.current.update(delta);
+      }
+    };
+
+    // Add identifier to the update function
+    update._id = 'characterAnimation';
+
+    // Register the update function with the game loop
+    const unregisterUpdate = registerUpdate(update);
 
     return () => {
-      cleanup.then(cleanupFn => {
-        if (cleanupFn) cleanupFn();
-      });
+      // Unregister the update function when component unmounts
+      unregisterUpdate();
     };
-  }, [scene, registerUpdate, keysRef, camera]);
+  }, [scene, isLoaded, registerUpdate]);
 
-  return null; // No DOM rendering, just Three.js logic
-} 
+  // Expose the playAnimation method to parent components
+  useEffect(() => {
+    if (!modelRef.current) return;
+
+    // Attach the playAnimation method to the model for external access
+    const model = modelRef.current as THREE.Group & { playAnimation?: typeof playAnimation };
+    model.playAnimation = playAnimation;
+
+    // No dependencies needed, as this should run only once after model is loaded
+  }, []);  // Empty dependency array is acceptable here
+
+  // The component doesn't render anything directly
+  return null;
+}

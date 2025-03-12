@@ -224,7 +224,13 @@ export default function GameCanvas() {
   // Handle character position updates
   const handleCharacterPositionUpdate = useCallback((position: THREE.Vector3) => {
     if (characterPositionRef.current) {
+      // Make sure to create a clean copy to avoid reference issues
       characterPositionRef.current.copy(position);
+
+      // Add debug logging occasionally to track position updates
+      if (Math.random() < 0.01) {
+        console.warn("Character position updated in GameCanvas:", characterPositionRef.current.clone());
+      }
     }
   }, []);
 
@@ -294,6 +300,10 @@ export default function GameCanvas() {
             targetRef={characterPositionRef}
             domElement={rendererRef.current.domElement}
             registerUpdate={registerUpdate}
+            isMobile={isMobile}
+            // Add shorter distance and higher height for better visibility
+            distance={7}
+            height={3}
           />
 
           <WaterBending

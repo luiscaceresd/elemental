@@ -461,9 +461,17 @@ export default function WaterBending({
               const angle = (i / totalSpheres) * Math.PI * 2;
               // Position spheres
               if (characterPositionRef.current) {
-                sphere.position.copy(characterPositionRef.current);
+                // Copy the character's position and ensure we're tracking it properly
+                const characterPos = characterPositionRef.current.clone();
+
+                // Debug log the character position occasionally
+                if (i === 0 && Math.random() < 0.01) {
+                  console.warn('Water belt tracking character at:', characterPos);
+                }
+
+                sphere.position.copy(characterPos);
                 sphere.position.x += Math.cos(angle + time * 0.5) * baseRadius;
-                sphere.position.y += 1.2 + Math.sin(time + angle * 5) * 0.2;
+                sphere.position.y += 1.2 + Math.sin(time + angle * 5) * 0.2; // Slightly above character's feet
                 sphere.position.z += Math.sin(angle + time * 0.5) * baseRadius;
               }
 
@@ -535,6 +543,64 @@ export default function WaterBending({
             drop.mesh.geometry.dispose();
             (drop.mesh.material as THREE.Material).dispose();
           });
+        }
+
+        // Handle water collection better
+        if (isBendingRef.current &&
+          bendingEffectRef.current &&
+          bendingParticlesRef.current &&
+          crosshairPositionRef.current) {
+
+          // Add more particles for a better bending effect
+          const positions = bendingParticlesRef.current.geometry.attributes.position.array as Float32Array;
+
+          // Update particle positions
+          for (let i = 0; i < 100; i++) {
+            const i3 = i * 3;
+            const radius = 3 * Math.random();
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI;
+
+            // Start particles from character position for better visual effect
+            const startPos = characterPositionRef?.current ? characterPositionRef.current.clone() : new THREE.Vector3();
+            startPos.y += 1.5; // Start at character's head level
+
+            // End position at the crosshair
+            const targetPos = crosshairPositionRef.current;
+
+            // Interpolate between start and target based on random progress
+            const progress = Math.random();
+            const pos = startPos.clone().lerp(targetPos, progress);
+
+            // Add some spiral motion
+            pos.x += Math.sin(theta) * radius * (1 - progress);
+            pos.y += Math.cos(phi) * radius * (1 - progress) * 0.5;
+            pos.z += Math.cos(theta) * radius * (1 - progress);
+
+            positions[i3] = pos.x;
+            positions[i3 + 1] = pos.y;
+            positions[i3 + 2] = pos.z;
+          }
+
+          bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
+
+          // Improve water collection logic
+          // ENHANCEMENT: Make water collection more predictable and satisfying
+          const collectChance = 0.08; // 8% chance per frame
+          if (Math.random() < collectChance) {
+            if (collectedDropsRef.current < MAX_WATER_DROPS) {
+              collectedDropsRef.current += 1;
+
+              // Add a visual feedback of collection - make the bending effect pulse
+              if (bendingEffectRef.current) {
+                const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
+                material.opacity = 0.8; // Brief bright flash
+                setTimeout(() => {
+                  if (material) material.opacity = 0.4;
+                }, 100);
+              }
+            }
+          }
         }
       };
       updateBendingEffects._id = 'bendingVisualEffects';
