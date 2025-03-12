@@ -71,6 +71,7 @@ export default function MobileControls({
     <>
       {/* Joystick container */}
       <div
+        id="joystick-zone"
         ref={joystickZoneRef}
         style={{
           position: 'absolute',
@@ -86,6 +87,7 @@ export default function MobileControls({
 
       {/* Jump button */}
       <button
+        id="jump-button"
         onClick={onJump}
         style={{
           position: 'absolute',

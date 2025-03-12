@@ -16,6 +16,7 @@ interface CameraControllerProps {
   sensitivity?: number; // Sensitivity for mouse movement (0.1 to 1.0)
   distance?: number; // Distance behind character
   height?: number; // Height above character
+  isMobile?: boolean; // Whether device is mobile
 }
 
 export default function CameraController({
@@ -26,11 +27,16 @@ export default function CameraController({
   lockCamera = false,
   sensitivity = 0.3, // Default sensitivity
   distance = 10, // Default distance
-  height = 2 // Default height
+  height = 2, // Default height
+  isMobile = false
 }: CameraControllerProps) {
   const controlsRef = useRef<any>(null);
   const controlObjectRef = useRef<THREE.Object3D | null>(null);
   const cameraLockedRef = useRef(lockCamera);
+
+  // Mobile touch handling
+  const cameraControlTouchId = useRef<number | null>(null);
+  const previousTouchPosition = useRef<{ x: number; y: number } | null>(null);
 
   // Update camera locked status when prop changes
   useEffect(() => {
@@ -51,47 +57,132 @@ export default function CameraController({
       }
       controlObjectRef.current = controlObject;
 
-      // Initialize PointerLockControls with the camera
-      const controls = new PointerLockControls(camera, domElement);
+      // Collection of cleanup functions
+      const cleanupFunctions: (() => void)[] = [];
 
-      // Try to access and modify internal pointer speed property
-      try {
-        // Using any type to bypass TypeScript's property checking
-        const controlsAny = controls as any;
-        controlsAny.pointerSpeed = sensitivity;
-      } catch (e) {
-        console.warn('Could not set pointer speed, using default sensitivity');
+      if (isMobile) {
+        // Set rotation order for consistency with PointerLockControls
+        camera.rotation.order = 'YXZ';
+
+        // Helper to check if touch is within joystick or jump button
+        const isWithinControls = (target: EventTarget): boolean => {
+          if (!(target instanceof Element)) return false;
+          return !!(
+            target.closest('#joystick-zone') || target.closest('#jump-button')
+          );
+        };
+
+        // Touch event handlers
+        const onTouchStart = (event: TouchEvent) => {
+          if (cameraLockedRef.current) return;
+
+          for (let i = 0; i < event.changedTouches.length; i++) {
+            const touch = event.changedTouches[i];
+            if (!isWithinControls(touch.target as EventTarget) && cameraControlTouchId.current === null) {
+              event.preventDefault(); // Prevent scrolling/zooming
+              cameraControlTouchId.current = touch.identifier;
+              previousTouchPosition.current = { x: touch.clientX, y: touch.clientY };
+              break;
+            }
+          }
+        };
+
+        const onTouchMove = (event: TouchEvent) => {
+          if (cameraLockedRef.current || cameraControlTouchId.current === null) return;
+
+          for (let i = 0; i < event.changedTouches.length; i++) {
+            const touch = event.changedTouches[i];
+            if (touch.identifier === cameraControlTouchId.current) {
+              event.preventDefault();
+
+              const deltaX = touch.clientX - (previousTouchPosition.current?.x ?? touch.clientX);
+              const deltaY = touch.clientY - (previousTouchPosition.current?.y ?? touch.clientY);
+
+              // Rotate camera (yaw and pitch)
+              camera.rotation.y -= deltaX * 0.002 * sensitivity;
+              camera.rotation.x -= deltaY * 0.002 * sensitivity;
+
+              // Clamp vertical rotation to prevent flipping
+              camera.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, camera.rotation.x));
+
+              previousTouchPosition.current = { x: touch.clientX, y: touch.clientY };
+              break;
+            }
+          }
+        };
+
+        const onTouchEnd = (event: TouchEvent) => {
+          for (let i = 0; i < event.changedTouches.length; i++) {
+            const touch = event.changedTouches[i];
+            if (touch.identifier === cameraControlTouchId.current) {
+              cameraControlTouchId.current = null;
+              previousTouchPosition.current = null;
+              break;
+            }
+          }
+        };
+
+        // Add touch event listeners
+        document.addEventListener('touchstart', onTouchStart, { passive: false });
+        document.addEventListener('touchmove', onTouchMove, { passive: false });
+        document.addEventListener('touchend', onTouchEnd);
+
+        cleanupFunctions.push(() => {
+          document.removeEventListener('touchstart', onTouchStart);
+          document.removeEventListener('touchmove', onTouchMove);
+          document.removeEventListener('touchend', onTouchEnd);
+        });
+      } else {
+        // Desktop setup with PointerLockControls
+        const controls = new PointerLockControls(camera, domElement);
+
+        // Try to access and modify internal pointer speed property
+        try {
+          // Using any type to bypass TypeScript's property checking
+          const controlsAny = controls as any;
+          controlsAny.pointerSpeed = sensitivity;
+        } catch (e) {
+          console.warn('Could not set pointer speed, using default sensitivity');
+        }
+
+        controlsRef.current = controls;
+
+        // Request pointer lock on click
+        const onClick = () => {
+          if (!cameraLockedRef.current) {
+            controls.lock();
+          }
+        };
+        domElement.addEventListener('click', onClick);
+
+        // Handle pointer lock state changes
+        const onPointerLockChange = () => {
+          if (document.pointerLockElement === domElement) {
+            console.log('Pointer locked');
+          } else {
+            console.log('Pointer unlocked');
+            // Ensure controls are unlocked when pointer lock is exited
+            if (controlsRef.current) {
+              controlsRef.current.unlock();
+            }
+          }
+        };
+        document.addEventListener('pointerlockchange', onPointerLockChange);
+
+        cleanupFunctions.push(() => {
+          domElement.removeEventListener('click', onClick);
+          document.removeEventListener('pointerlockchange', onPointerLockChange);
+          if (controlsRef.current) {
+            controlsRef.current.dispose();
+          }
+        });
       }
-
-      controlsRef.current = controls;
 
       // Configuration (using props)
       const distanceFromCharacter = distance;
       const heightOffsetFromCharacter = height;
 
-      // Request pointer lock on click
-      const onClick = () => {
-        if (!cameraLockedRef.current) {
-          controls.lock();
-        }
-      };
-      domElement.addEventListener('click', onClick);
-
-      // Handle pointer lock state changes
-      const onPointerLockChange = () => {
-        if (document.pointerLockElement === domElement) {
-          console.log('Pointer locked');
-        } else {
-          console.log('Pointer unlocked');
-          // Ensure controls are unlocked when pointer lock is exited
-          if (controlsRef.current) {
-            controlsRef.current.unlock();
-          }
-        }
-      };
-      document.addEventListener('pointerlockchange', onPointerLockChange);
-
-      // Update function to position camera
+      // Update function to position camera (same for both mobile and desktop)
       const updateCamera: IdentifiableFunction = (delta: number) => {
         if (!targetRef.current || !controlObjectRef.current || cameraLockedRef.current) return;
 
@@ -128,21 +219,14 @@ export default function CameraController({
 
         // Position camera behind character based on camera direction
         camera.position.copy(targetRef.current).add(offset);
-
-        // Look at character from current camera position
-        // We don't override the camera's orientation here - otherwise controls won't work
-        // Instead, we just position the camera in the right spot
       };
+
       updateCamera._id = 'pointerLockCameraUpdate';
       const removeUpdate = registerUpdate(updateCamera);
+      cleanupFunctions.push(removeUpdate);
 
       return () => {
-        domElement.removeEventListener('click', onClick);
-        document.removeEventListener('pointerlockchange', onPointerLockChange);
-        if (controlsRef.current) {
-          controlsRef.current.dispose();
-        }
-        removeUpdate();
+        cleanupFunctions.forEach(fn => fn());
       };
     };
 
@@ -155,7 +239,7 @@ export default function CameraController({
         });
       }
     };
-  }, [camera, targetRef, domElement, registerUpdate]);
+  }, [camera, targetRef, domElement, registerUpdate, lockCamera, sensitivity, distance, height, isMobile]);
 
   return null;
 } 
