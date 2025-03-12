@@ -12,82 +12,143 @@ interface CameraControllerProps {
   targetRef: React.RefObject<THREE.Vector3 | null>; // Character position
   domElement: HTMLCanvasElement;
   registerUpdate: (updateFn: IdentifiableFunction) => () => void;
+  lockCamera?: boolean; // Optional prop to lock camera if needed
+  sensitivity?: number; // Sensitivity for mouse movement (0.1 to 1.0)
+  distance?: number; // Distance behind character
+  height?: number; // Height above character
 }
 
 export default function CameraController({
   camera,
   targetRef,
   domElement,
-  registerUpdate
+  registerUpdate,
+  lockCamera = false,
+  sensitivity = 0.3, // Default sensitivity
+  distance = 10, // Default distance
+  height = 2 // Default height
 }: CameraControllerProps) {
-  const yawRef = useRef(0);   // Horizontal rotation
-  const pitchRef = useRef(0); // Vertical rotation
+  const controlsRef = useRef<any>(null);
+  const controlObjectRef = useRef<THREE.Object3D | null>(null);
+  const cameraLockedRef = useRef(lockCamera);
+
+  // Update camera locked status when prop changes
+  useEffect(() => {
+    cameraLockedRef.current = lockCamera;
+  }, [lockCamera]);
 
   useEffect(() => {
     if (!camera || !targetRef.current || !domElement) return;
 
     const setupCamera = async () => {
       const THREE = await import('three');
+      const { PointerLockControls } = await import('three/examples/jsm/controls/PointerLockControls.js');
 
-      const sensitivity = 0.001; // Mouse sensitivity
-      const distance = 10;       // Distance from character
-      const height = 5;          // Height above character
+      // Create a control object to manage rotation
+      const controlObject = new THREE.Object3D();
+      if (targetRef.current) {
+        controlObject.position.copy(targetRef.current);
+      }
+      controlObjectRef.current = controlObject;
 
-      // Initial pitch setting for camera orientation
-      pitchRef.current = 0.2;    // Initial pitch of ~11.5 degrees
+      // Initialize PointerLockControls with the camera
+      const controls = new PointerLockControls(camera, domElement);
 
-      const onMouseMove = (event: MouseEvent) => {
-        const deltaX = event.movementX || 0;
-        const deltaY = event.movementY || 0;
+      // Try to access and modify internal pointer speed property
+      try {
+        // Using any type to bypass TypeScript's property checking
+        const controlsAny = controls as any;
+        controlsAny.pointerSpeed = sensitivity;
+      } catch (e) {
+        console.warn('Could not set pointer speed, using default sensitivity');
+      }
 
-        yawRef.current -= deltaX * sensitivity;
-        pitchRef.current -= deltaY * sensitivity;
+      controlsRef.current = controls;
 
-        // Clamp pitch between -45° and 45°
-        pitchRef.current = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, pitchRef.current));
+      // Configuration (using props)
+      const distanceFromCharacter = distance;
+      const heightOffsetFromCharacter = height;
+
+      // Request pointer lock on click
+      const onClick = () => {
+        if (!cameraLockedRef.current) {
+          controls.lock();
+        }
       };
+      domElement.addEventListener('click', onClick);
 
-      domElement.addEventListener('mousemove', onMouseMove);
-
-      const updateCamera = (delta: number) => {
-        // Use delta parameter to avoid unused variable warning
-        if (delta) { /* ensure delta is used */ }
-
-        if (!targetRef.current) return;
-        const target = targetRef.current as THREE.Vector3;
-
-        // Compute camera position using spherical coordinates
-        const x = target.x + distance * Math.sin(yawRef.current) * Math.cos(pitchRef.current);
-        const z = target.z + distance * Math.cos(yawRef.current) * Math.cos(pitchRef.current);
-        const y = target.y + height + distance * Math.sin(pitchRef.current);
-
-        // Directly set camera position rather than using lerp
-        camera.position.set(x, y, z);
-
-        // Define an offset to look above the character
-        const offset = 4; // Adjust this value to control the upward tilt
-        const lookAtPosition = new THREE.Vector3(target.x, target.y + offset, target.z);
-
-        // Make the camera look at this elevated point instead of directly at the character
-        camera.lookAt(lookAtPosition);
+      // Handle pointer lock state changes
+      const onPointerLockChange = () => {
+        if (document.pointerLockElement === domElement) {
+          console.log('Pointer locked');
+        } else {
+          console.log('Pointer unlocked');
+          // Ensure controls are unlocked when pointer lock is exited
+          if (controlsRef.current) {
+            controlsRef.current.unlock();
+          }
+        }
       };
+      document.addEventListener('pointerlockchange', onPointerLockChange);
 
-      updateCamera._id = 'cameraUpdate';
+      // Update function to position camera
+      const updateCamera: IdentifiableFunction = (delta: number) => {
+        if (!targetRef.current || !controlObjectRef.current || cameraLockedRef.current) return;
 
+        // Update control object position to follow character
+        controlObjectRef.current.position.copy(targetRef.current);
+
+        // Get the direction the camera is facing from controls
+        const direction = new THREE.Vector3(0, 0, -1);
+        camera.getWorldDirection(direction);
+        direction.negate(); // Reverse direction to position camera behind character
+
+        // Create a horizontal direction (for left/right positioning)
+        const horizontalDir = new THREE.Vector3(direction.x, 0, direction.z);
+        horizontalDir.normalize();
+
+        // Calculate vertical angle (pitch) - clamped for better gameplay
+        // Limit looking too far up or down to prevent disorientation
+        const verticalAngle = Math.max(-0.6, Math.min(0.6, Math.asin(direction.y)));
+
+        // Calculate camera offset - using a spring arm style approach
+        // This is similar to how Unreal Engine handles third-person cameras
+        const horizontalDistance = distanceFromCharacter * Math.cos(verticalAngle);
+
+        // Add a fixed height offset to prevent top-down view
+        // This ensures camera stays behind character, not directly above
+        const heightOffset = heightOffsetFromCharacter + distanceFromCharacter * Math.sin(verticalAngle);
+
+        // Calculate final offset
+        const offsetX = horizontalDir.x * horizontalDistance;
+        const offsetY = heightOffset; // Fixed height plus vertical angle component
+        const offsetZ = horizontalDir.z * horizontalDistance;
+
+        const offset = new THREE.Vector3(offsetX, offsetY, offsetZ);
+
+        // Position camera behind character based on camera direction
+        camera.position.copy(targetRef.current).add(offset);
+
+        // Look at character from current camera position
+        // We don't override the camera's orientation here - otherwise controls won't work
+        // Instead, we just position the camera in the right spot
+      };
+      updateCamera._id = 'pointerLockCameraUpdate';
       const removeUpdate = registerUpdate(updateCamera);
 
       return () => {
-        domElement.removeEventListener('mousemove', onMouseMove);
+        domElement.removeEventListener('click', onClick);
+        document.removeEventListener('pointerlockchange', onPointerLockChange);
+        if (controlsRef.current) {
+          controlsRef.current.dispose();
+        }
         removeUpdate();
       };
     };
 
-    // Execute the setup function
     const cleanup = setupCamera();
 
-    // Return a cleanup function for the useEffect
     return () => {
-      // Handle the Promise correctly
       if (cleanup) {
         cleanup.then(cleanupFn => {
           if (cleanupFn) cleanupFn();
