@@ -25,6 +25,31 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Make all buttons and interactive elements show pointer cursor on hover */
+button,
+.button,
+[role="button"],
+.clickable,
+a,
+.start-button,
+.pause-button,
+.resume-button,
+.exit-button,
+.mobile-control-button,
+#start-button, 
+#resume-button,
+#exit-button,
+#jump-button {
+  cursor: pointer !important;
+}
+
+/* Interactive elements without the button tag */
+[onclick],
+[class*="hover:"],
+[id="joystick-zone"] {
+  cursor: pointer;
+}
+
 /* Custom animations */
 @keyframes fadeIn {
   from {

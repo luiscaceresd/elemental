@@ -37,7 +37,7 @@ export default function WaterBending({
   const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]); // Back to just core spheres
   const freeDropsRef = useRef<{ mesh: THREE.Mesh; velocity: THREE.Vector3 }[]>([]);
   const [displayedDrops, setDisplayedDrops] = useState<number>(0);
-  const MAX_WATER_DROPS = 300;
+  const MAX_WATER_DROPS = 450;
   const REQUIRED_DROPS_TO_FIRE = 45;
   const MAX_VISIBLE_SPHERES = 50;
 
@@ -125,11 +125,11 @@ export default function WaterBending({
         if (!characterPositionRef?.current) return;
 
         if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) {
-          console.log('Not enough water to create a spear!');
+          // Not enough water to create a spear
           return;
         }
 
-        console.log(`Creating water spear with ${collectedDropsRef.current} drops`);
+        // Creating water spear
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
 
         const spearGeometry = new THREE.CylinderGeometry(0.4, 0.1, 3.5, 16);
@@ -305,14 +305,12 @@ export default function WaterBending({
         if (event.button === 0) {
           isBendingRef.current = true;
           updateCrosshairPosition();
-          console.log('Bending started:', isBendingRef.current);
         }
       };
 
       const onMouseUp = (event: MouseEvent) => {
         if (event.button === 0) {
           isBendingRef.current = false;
-          console.log('Bending stopped, collected drops:', collectedDropsRef.current);
         }
       };
 
@@ -321,9 +319,6 @@ export default function WaterBending({
           event.preventDefault();
           if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
             createWaterSpear();
-            console.log('Water spear fired with right-click!');
-          } else {
-            console.log('Not enough water to fire a spear!');
           }
         }
       };
@@ -346,20 +341,15 @@ export default function WaterBending({
       hammer.on('panstart', () => {
         isBendingRef.current = true;
         updateCrosshairPosition();
-        console.log('Touch bending started:', isBendingRef.current);
       });
 
       hammer.on('panend', () => {
         isBendingRef.current = false;
-        console.log('Touch bending stopped, collected drops:', collectedDropsRef.current);
       });
 
       hammer.on('tap', () => {
         if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
           createWaterSpear();
-          console.log('Water spear fired with tap!');
-        } else {
-          console.log('Not enough water to fire a spear!');
         }
       });
 
@@ -463,11 +453,6 @@ export default function WaterBending({
               if (characterPositionRef.current) {
                 // Copy the character's position and ensure we're tracking it properly
                 const characterPos = characterPositionRef.current.clone();
-
-                // Debug log the character position occasionally
-                if (i === 0 && Math.random() < 0.01) {
-                  console.warn('Water belt tracking character at:', characterPos);
-                }
 
                 sphere.position.copy(characterPos);
                 sphere.position.x += Math.cos(angle + time * 0.5) * baseRadius;

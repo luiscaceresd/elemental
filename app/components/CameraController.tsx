@@ -145,7 +145,7 @@ export default function CameraController({
           // Use proper type casting for the controls object 
           (controls as PointerLockControls & { pointerSpeed: number }).pointerSpeed = sensitivity;
         } catch {
-          console.warn('Could not set pointer speed, using default sensitivity');
+          // Could not set pointer speed, using default sensitivity
         }
 
         // Request pointer lock on click
@@ -159,13 +159,13 @@ export default function CameraController({
         // Handle pointer lock state changes
         const onPointerLockChange = () => {
           if (document.pointerLockElement === domElement) {
-            console.log('Pointer locked');
+            // Pointer is now locked
           } else {
-            console.log('Pointer unlocked');
-            // Ensure controls are unlocked when pointer lock is exited
+            // Pointer is now unlocked
             controls.unlock();
           }
         };
+
         document.addEventListener('pointerlockchange', onPointerLockChange);
 
         cleanupFunctions.push(() => {
@@ -182,12 +182,10 @@ export default function CameraController({
       // Update function to position camera (same for both mobile and desktop)
       const updateCamera: IdentifiableFunction = () => {
         if (!targetRef.current) {
-          console.warn("Camera target is null - cannot update camera position");
           return;
         }
 
         if (!controlObjectRef.current) {
-          console.warn("Camera control object is null - cannot update camera position");
           return;
         }
 
@@ -197,13 +195,6 @@ export default function CameraController({
 
         // CRITICAL FIX: Update control object position to follow character immediately
         controlObjectRef.current.position.copy(targetRef.current);
-
-        // Debug camera position
-        if (Math.random() < 0.01) {
-          console.warn('Camera Debug:');
-          console.warn('- Target at:', targetRef.current.clone());
-          console.warn('- Camera position:', camera.position.clone());
-        }
 
         // Get the direction the camera is facing from controls
         const direction = new THREE.Vector3(0, 0, -1);

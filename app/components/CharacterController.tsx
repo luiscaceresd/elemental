@@ -219,11 +219,6 @@ export default function CharacterController({
 
           // Ensure model is always visible
           characterRef.current.visible = true;
-
-          // Occasionally log position for debugging
-          if (Math.random() < 0.01) {
-            console.log('Character position:', characterRef.current.position);
-          }
         }
 
         // Call the position update callback if it exists

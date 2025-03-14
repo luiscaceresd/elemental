@@ -61,6 +61,7 @@ export default function Crosshair() {
 
   return (
     <div
+      className="hide-when-paused"
       style={{
         position: 'fixed',
         left: '50%',

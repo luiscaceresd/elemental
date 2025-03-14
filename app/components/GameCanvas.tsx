@@ -15,7 +15,7 @@ type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string
 };
 
-export default function GameCanvas() {
+export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paused' }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [sceneReady, setSceneReady] = useState(false);
 
@@ -226,11 +226,6 @@ export default function GameCanvas() {
     if (characterPositionRef.current) {
       // Make sure to create a clean copy to avoid reference issues
       characterPositionRef.current.copy(position);
-
-      // Add debug logging occasionally to track position updates
-      if (Math.random() < 0.01) {
-        console.warn("Character position updated in GameCanvas:", characterPositionRef.current.clone());
-      }
     }
   }, []);
 
@@ -316,8 +311,8 @@ export default function GameCanvas() {
             characterPositionRef={characterPositionRef}
           />
 
-          {/* Show mobile controls only on mobile devices */}
-          {isMobile && (
+          {/* Show mobile controls only on mobile devices when game is playing */}
+          {isMobile && gameState === 'playing' && (
             <MobileControls
               onJoystickMove={handleJoystickMove}
               onJoystickEnd={handleJoystickEnd}

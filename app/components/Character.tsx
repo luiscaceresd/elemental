@@ -65,7 +65,6 @@ export default function Character({
             (gltf) => resolve(gltf),
             (progress) => {
               // Optional: You can log or handle progress here
-              console.log(`Loading model: ${Math.round(progress.loaded / progress.total * 100)}%`);
             },
             (error) => reject(error)
           );
@@ -86,8 +85,6 @@ export default function Character({
         // But our movement is calculated relative to the camera direction
         // We rotate 180 degrees to face the character forward properly
         model.rotation.y = Math.PI;
-
-        console.log('Character model orientation set to align with movement direction');
 
         // Ensure all materials and meshes are visible
         let meshCount = 0;
@@ -111,11 +108,6 @@ export default function Character({
           }
         });
 
-        console.log(`Character model has ${meshCount} visible meshes`);
-
-        // Log the model hierarchy for debugging
-        console.log('Character model hierarchy:', model);
-
         // Store the model in a ref for later use
         modelRef.current = model;
 
@@ -127,7 +119,7 @@ export default function Character({
           const mixer = new THREE.AnimationMixer(model);
           mixerRef.current = mixer;
 
-          console.log('Available animations:', gltf.animations.map(a => a.name));
+          // Animation names are available but not logged to console
 
           // Create animation actions and store them in the ref
           gltf.animations.forEach((clip: AnimationClip) => {
@@ -142,7 +134,6 @@ export default function Character({
             // If no 'idle' animation, play the first available animation
             const firstAnimName = gltf.animations[0].name;
             actionsRef.current[firstAnimName].play();
-            console.log(`Playing animation: ${firstAnimName}`);
           }
         }
 
@@ -152,9 +143,8 @@ export default function Character({
         }
 
         setIsLoaded(true);
-        console.log('Character model loaded successfully');
       } catch (error) {
-        console.error('Error loading character model:', error);
+        // Model loading failed
       }
     };
 
@@ -179,8 +169,8 @@ export default function Character({
 
   // Method to play a specific animation
   const playAnimation = (animationName: string, fadeInTime: number = 0.5) => {
-    if (!mixerRef.current || !actionsRef.current[animationName]) {
-      console.warn(`Animation ${animationName} not found`);
+    if (!actionsRef.current[animationName]) {
+      // Animation not found
       return;
     }
 

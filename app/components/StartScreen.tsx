@@ -57,11 +57,10 @@ export default function StartScreen({ onStart }: StartScreenProps) {
             alt="Elemental Game - A character overlooking a mystical arena"
             priority
             quality={100}
-            width={1920}
-            height={1080}
+            fill
             sizes="100vw"
             style={{
-              objectFit: 'contain',
+              objectFit: 'cover',
               objectPosition: 'center'
             }}
             className="brightness-90"

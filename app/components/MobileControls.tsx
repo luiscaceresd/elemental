@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface MobileControlsProps {
   onJoystickMove: (x: number, y: number) => void;
@@ -15,6 +15,18 @@ export default function MobileControls({
 }: MobileControlsProps) {
   const joystickZoneRef = useRef<HTMLDivElement>(null);
   const nippleInstanceRef = useRef<unknown>(null);
+  const [isPortrait, setIsPortrait] = useState(false);
+
+  // Check if we're in portrait mode for responsive positioning
+  useEffect(() => {
+    const checkOrientation = () => {
+      setIsPortrait(window.innerHeight > window.innerWidth);
+    };
+
+    checkOrientation();
+    window.addEventListener('resize', checkOrientation);
+    return () => window.removeEventListener('resize', checkOrientation);
+  }, []);
 
   // This useEffect is necessary for nipplejs integration
   useEffect(() => {
@@ -24,11 +36,14 @@ export default function MobileControls({
 
       if (!joystickZoneRef.current) return;
 
-      // Create the joystick
+      // Create the joystick with dynamic positioning based on orientation
       const nippleManager = nipplejs.create({
         zone: joystickZoneRef.current,
         mode: 'static',
-        position: { left: '120px', bottom: '120px' },
+        position: {
+          left: '120px',
+          bottom: isPortrait ? '150px' : '120px' // Higher in portrait mode
+        },
         color: 'rgba(255, 255, 255, 0.5)',
         size: 120
       });
@@ -65,7 +80,37 @@ export default function MobileControls({
         if (cleanupFn) cleanupFn();
       });
     };
-  }, [onJoystickMove, onJoystickEnd]);
+  }, [onJoystickMove, onJoystickEnd, isPortrait]);
+
+  // Calculate position based on orientation
+  const joystickStyle = {
+    position: 'absolute',
+    bottom: isPortrait ? '150px' : '60px', // Higher in portrait mode
+    left: '60px',
+    width: '120px',
+    height: '120px',
+    borderRadius: '50%',
+    background: 'rgba(100, 100, 100, 0.3)',
+    zIndex: 1000
+  } as const;
+
+  // Jump button style with responsive positioning
+  const jumpButtonStyle = {
+    position: 'absolute',
+    bottom: isPortrait ? '150px' : '60px', // Higher in portrait mode
+    right: '60px',
+    width: '80px',
+    height: '80px',
+    borderRadius: '50%',
+    background: 'rgba(0, 120, 255, 0.6)',
+    border: 'none',
+    color: 'white',
+    fontSize: '20px',
+    fontWeight: 'bold',
+    zIndex: 1000,
+    cursor: 'pointer',
+    boxShadow: '0 0 10px rgba(0, 0, 0, 0.5)' // Add shadow for better visibility
+  } as const;
 
   return (
     <>
@@ -73,37 +118,16 @@ export default function MobileControls({
       <div
         id="joystick-zone"
         ref={joystickZoneRef}
-        style={{
-          position: 'absolute',
-          bottom: '60px',
-          left: '60px',
-          width: '120px',
-          height: '120px',
-          borderRadius: '50%',
-          background: 'rgba(100, 100, 100, 0.3)',
-          zIndex: 1000
-        }}
+        className="hide-when-paused"
+        style={joystickStyle}
       />
 
       {/* Jump button */}
       <button
         id="jump-button"
+        className="hide-when-paused"
         onClick={onJump}
-        style={{
-          position: 'absolute',
-          bottom: '60px',
-          right: '60px',
-          width: '80px',
-          height: '80px',
-          borderRadius: '50%',
-          background: 'rgba(0, 120, 255, 0.6)',
-          border: 'none',
-          color: 'white',
-          fontSize: '20px',
-          fontWeight: 'bold',
-          zIndex: 1000,
-          cursor: 'pointer'
-        }}
+        style={jumpButtonStyle}
       >
         JUMP
       </button>

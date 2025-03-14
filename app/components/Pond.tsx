@@ -101,8 +101,6 @@ export default function Pond({
       const updatePond = (delta: number) => {
         if (delta > 0.1) return; // Skip large deltas
 
-        console.log('Bending state:', isBendingRef.current); // Debug log
-
         // Process each drop
         for (let i = 0; i < drops.length; i++) {
           if (!drops[i].visible) continue;
