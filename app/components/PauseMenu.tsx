@@ -157,8 +157,7 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
             alt="Elemental Game - Paused"
             priority
             quality={100}
-            width={1920}
-            height={1080}
+            fill
             sizes="100vw"
             style={{
               objectFit: 'contain',
