@@ -57,7 +57,7 @@ export default function GameWrapper() {
     };
 
     // Handle pointer lock errors
-    const handlePointerLockError = (e: Event) => {
+    const handlePointerLockError = () => {
       pointerLockRequestedRef.current = false;
 
       // If we tried to enter playing state but pointer lock failed, force pause
@@ -71,13 +71,16 @@ export default function GameWrapper() {
     document.addEventListener('pointerlockchange', handlePointerLockChange);
     document.addEventListener('pointerlockerror', handlePointerLockError);
 
+    // Store the current timer reference for cleanup
+    const currentTimerRef = pointerLockTimerRef.current;
+
     return () => {
       document.removeEventListener('pointerlockchange', handlePointerLockChange);
       document.removeEventListener('pointerlockerror', handlePointerLockError);
 
       // Clear any pending timers
-      if (pointerLockTimerRef.current) {
-        clearTimeout(pointerLockTimerRef.current);
+      if (currentTimerRef !== null) {
+        clearTimeout(currentTimerRef);
       }
     };
   }, [gameState, isMobile]);
@@ -98,8 +101,9 @@ export default function GameWrapper() {
     if (document.pointerLockElement) {
       try {
         document.exitPointerLock();
-      } catch (error) {
-        // Failed to release pointer lock
+      } catch (lockError) {
+        // Failed to release pointer lock - log for debugging
+        console.error('Failed to release pointer lock:', lockError);
       }
     }
   }, []);
@@ -119,8 +123,9 @@ export default function GameWrapper() {
     if (document.pointerLockElement) {
       try {
         document.exitPointerLock();
-      } catch (error) {
-        // Failed to release pointer lock
+      } catch (lockError) {
+        // Failed to release pointer lock - log for debugging
+        console.error('Failed to release pointer lock:', lockError);
       }
     }
 

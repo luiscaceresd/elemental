@@ -63,10 +63,14 @@ export default function Character({
           loader.load(
             '/models/character.glb',
             (gltf) => resolve(gltf),
-            (progress) => {
-              // Optional: You can log or handle progress here
+            () => {
+              // Progress tracking omitted
             },
-            (error) => reject(error)
+            (error) => {
+              // Log loading errors to help with debugging
+              console.error('Error loading character model:', error);
+              reject(error);
+            }
           );
         });
 
@@ -87,10 +91,8 @@ export default function Character({
         model.rotation.y = Math.PI;
 
         // Ensure all materials and meshes are visible
-        let meshCount = 0;
         model.traverse((node) => {
           if (node instanceof THREE.Mesh) {
-            meshCount++;
             node.castShadow = true;
             node.receiveShadow = true;
             node.visible = true;
@@ -143,8 +145,9 @@ export default function Character({
         }
 
         setIsLoaded(true);
-      } catch (error) {
-        // Model loading failed
+      } catch (loadError) {
+        // Model loading failed - log error for debugging
+        console.error('Failed to load character model:', loadError);
       }
     };
 

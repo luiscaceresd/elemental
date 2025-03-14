@@ -35,19 +35,8 @@ a,
 .pause-button,
 .resume-button,
 .exit-button,
-.mobile-control-button,
-#start-button, 
-#resume-button,
-#exit-button,
-#jump-button {
+.mobile-control-button {
   cursor: pointer !important;
-}
-
-/* Interactive elements without the button tag */
-[onclick],
-[class*="hover:"],
-[id="joystick-zone"] {
-  cursor: pointer;
 }
 
 /* Custom animations */

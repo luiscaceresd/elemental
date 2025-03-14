@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 
 interface PauseMenuProps {
@@ -23,42 +23,8 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
     );
   }, []);
 
-  // Add direct touch event handlers for mobile
-  useEffect(() => {
-    if (!isMobile) return;
-
-    const handleResumeTouch = (e: TouchEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handleResume();
-    };
-
-    const handleExitTouch = (e: TouchEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handleExit();
-    };
-
-    if (resumeButtonRef.current) {
-      resumeButtonRef.current.addEventListener('touchstart', handleResumeTouch, { passive: false });
-    }
-
-    if (exitButtonRef.current) {
-      exitButtonRef.current.addEventListener('touchstart', handleExitTouch, { passive: false });
-    }
-
-    return () => {
-      if (resumeButtonRef.current) {
-        resumeButtonRef.current.removeEventListener('touchstart', handleResumeTouch);
-      }
-      if (exitButtonRef.current) {
-        exitButtonRef.current.removeEventListener('touchstart', handleExitTouch);
-      }
-    };
-  }, [isMobile]);
-
-  // Handle resume button click
-  const handleResume = () => {
+  // Handle resume button click - wrap in useCallback to prevent recreation on each render
+  const handleResume = useCallback(() => {
     setFadeOut(true);
     // Delay the onResume callback to allow for fade out animation
     setTimeout(() => {
@@ -78,16 +44,54 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
         }, 100);
       }
     }, 500);
-  };
+  }, [onResume, isMobile]);
 
-  // Handle exit button click
-  const handleExit = () => {
+  // Handle exit button click - wrap in useCallback to prevent recreation on each render
+  const handleExit = useCallback(() => {
     setFadeOut(true);
     // Delay the onExit callback to allow for fade out animation
     setTimeout(() => {
       onExit();
     }, 500);
-  };
+  }, [onExit]);
+
+  // Add direct touch event handlers for mobile
+  useEffect(() => {
+    if (!isMobile) return;
+
+    // Store ref values in local variables to use in cleanup
+    const resumeButton = resumeButtonRef.current;
+    const exitButton = exitButtonRef.current;
+
+    const handleResumeTouch = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleResume();
+    };
+
+    const handleExitTouch = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleExit();
+    };
+
+    if (resumeButton) {
+      resumeButton.addEventListener('touchstart', handleResumeTouch, { passive: false });
+    }
+
+    if (exitButton) {
+      exitButton.addEventListener('touchstart', handleExitTouch, { passive: false });
+    }
+
+    return () => {
+      if (resumeButton) {
+        resumeButton.removeEventListener('touchstart', handleResumeTouch);
+      }
+      if (exitButton) {
+        exitButton.removeEventListener('touchstart', handleExitTouch);
+      }
+    };
+  }, [isMobile, handleResume, handleExit]);
 
   // Auto-focus the resume button when component mounts
   useEffect(() => {
