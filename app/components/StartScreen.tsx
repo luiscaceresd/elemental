@@ -60,8 +60,7 @@ export default function StartScreen({ onStart }: StartScreenProps) {
             fill
             sizes="100vw"
             style={{
-              objectFit: 'cover',
-              objectPosition: 'center'
+              objectFit: 'contain',
             }}
             className="brightness-90"
           />

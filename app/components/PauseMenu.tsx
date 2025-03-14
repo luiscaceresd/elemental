@@ -157,10 +157,11 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
             alt="Elemental Game - Paused"
             priority
             quality={100}
-            fill
+            width={1920}
+            height={1080}
             sizes="100vw"
             style={{
-              objectFit: 'cover',
+              objectFit: 'contain',
               objectPosition: 'center'
             }}
             className="brightness-75" // Slightly darker for pause screen
