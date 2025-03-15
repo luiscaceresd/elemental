@@ -18,6 +18,15 @@ interface WaterBendingProps {
   characterPositionRef?: React.MutableRefObject<THREE.Vector3 | null>;
 }
 
+// Define a WaterSpear type for our pool
+interface WaterSpear {
+  spearGroup: THREE.Group;
+  trail: THREE.Points;
+  trailGeometry: THREE.BufferGeometry;
+  raycaster: THREE.Raycaster;
+  inUse: boolean;
+}
+
 export default function WaterBending({
   scene,
   domElement,
@@ -41,6 +50,19 @@ export default function WaterBending({
   const REQUIRED_DROPS_TO_FIRE = 45;
   const MAX_VISIBLE_SPHERES = 50;
 
+  // Add refs for shared water projectile resources
+  const spearGeometryRef = useRef<THREE.CylinderGeometry | null>(null);
+  const spearMaterialRef = useRef<THREE.MeshPhysicalMaterial | null>(null);
+  const glowGeometryRef = useRef<THREE.CylinderGeometry | null>(null);
+  const glowMaterialRef = useRef<THREE.MeshBasicMaterial | null>(null);
+  const dropGeometryRef = useRef<THREE.SphereGeometry | null>(null);
+  const dropMaterialRef = useRef<THREE.MeshPhysicalMaterial | null>(null);
+  const trailMaterialRef = useRef<THREE.PointsMaterial | null>(null);
+
+  // Add a spear pool for object reuse
+  const spearPoolRef = useRef<WaterSpear[]>([]);
+  const SPEAR_POOL_SIZE = 10; // Adjust based on maximum expected simultaneous spears
+
   useEffect(() => {
     const updateDisplayCount = () => {
       setDisplayedDrops(collectedDropsRef.current);
@@ -56,6 +78,91 @@ export default function WaterBending({
       const Hammer = (await import('hammerjs')).default;
 
       raycasterRef.current = new THREE.Raycaster();
+
+      // Initialize shared resources for water projectile
+      spearGeometryRef.current = new THREE.CylinderGeometry(0.4, 0.1, 3.5, 16);
+      spearMaterialRef.current = new THREE.MeshPhysicalMaterial({
+        color: 0x00BFFF,
+        transparent: true,
+        opacity: 0.9,
+        roughness: 0.1,
+        metalness: 0.2,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        transmission: 0.8,
+        ior: 1.33,
+        emissive: 0x0077BB,
+        emissiveIntensity: 0.5
+      });
+
+      glowGeometryRef.current = new THREE.CylinderGeometry(0.6, 0.3, 4.0, 16);
+      glowMaterialRef.current = new THREE.MeshBasicMaterial({
+        color: 0x00BFFF,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.BackSide,
+      });
+
+      dropGeometryRef.current = new THREE.SphereGeometry(0.3, 16, 16);
+      dropMaterialRef.current = new THREE.MeshPhysicalMaterial({
+        color: 0xADD8E6,
+        transparent: true,
+        opacity: 0.8,
+        roughness: 0.1,
+        metalness: 0.1,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.1,
+        transmission: 0.9,
+        ior: 1.33,
+      });
+
+      trailMaterialRef.current = new THREE.PointsMaterial({
+        color: 0x87CEFA,
+        size: 0.3,
+        transparent: true,
+        opacity: 0.6,
+        blending: THREE.AdditiveBlending,
+      });
+
+      // Initialize the spear pool
+      for (let i = 0; i < SPEAR_POOL_SIZE; i++) {
+        // Create spear group with spear and glow meshes
+        const spearGroup = new THREE.Group();
+
+        // Create spear mesh using shared geometry and material
+        const spear = new THREE.Mesh(spearGeometryRef.current, spearMaterialRef.current);
+        spear.castShadow = true;
+        spearGroup.add(spear);
+
+        // Create glow mesh using shared geometry and material
+        const glow = new THREE.Mesh(glowGeometryRef.current, glowMaterialRef.current);
+        spearGroup.add(glow);
+
+        // Create trail with unique geometry but shared material
+        const trailGeometry = new THREE.BufferGeometry();
+        const trailParticles = 30;
+        const trailPositions = new Float32Array(trailParticles * 3);
+
+        // Initialize positions to be far away (they'll be reset when used)
+        for (let j = 0; j < trailParticles; j++) {
+          const j3 = j * 3;
+          trailPositions[j3] = 0;
+          trailPositions[j3 + 1] = -1000; // Hidden position
+          trailPositions[j3 + 2] = 0;
+        }
+
+        trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+        const trail = new THREE.Points(trailGeometry, trailMaterialRef.current);
+
+        // Add to pool (not to scene yet - will be added when used)
+        spearPoolRef.current.push({
+          spearGroup,
+          trail,
+          trailGeometry,
+          raycaster: new THREE.Raycaster(),
+          inUse: false
+        });
+      }
 
       const glowGeometry = new THREE.SphereGeometry(0.5, 16, 16);
       const glowMaterial = new THREE.MeshBasicMaterial({
@@ -121,6 +228,36 @@ export default function WaterBending({
         crosshairPositionRef.current.copy(newPosition);
       };
 
+      const getSpearFromPool = (): WaterSpear | null => {
+        // Find an available spear in the pool
+        const availableSpear = spearPoolRef.current.find(spear => !spear.inUse);
+
+        if (availableSpear) {
+          availableSpear.inUse = true;
+          return availableSpear;
+        }
+
+        // No spears available in the pool
+        console.warn('Water spear pool exhausted. Consider increasing pool size.');
+        return null;
+      };
+
+      const returnSpearToPool = (spear: WaterSpear) => {
+        // Remove from scene
+        scene.remove(spear.spearGroup);
+        scene.remove(spear.trail);
+
+        // Reset trail positions to hidden
+        const positions = spear.trail.geometry.attributes.position.array as Float32Array;
+        for (let i = 0; i < positions.length / 3; i++) {
+          positions[i * 3 + 1] = -1000; // Hide trail points
+        }
+        spear.trail.geometry.attributes.position.needsUpdate = true;
+
+        // Mark as available for reuse
+        spear.inUse = false;
+      };
+
       const createWaterSpear = () => {
         if (!characterPositionRef?.current) return;
 
@@ -132,38 +269,13 @@ export default function WaterBending({
         // Creating water spear
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
 
-        const spearGeometry = new THREE.CylinderGeometry(0.4, 0.1, 3.5, 16);
-        const spearGroup = new THREE.Group();
+        // Get a spear from the pool
+        const pooledSpear = getSpearFromPool();
+        if (!pooledSpear) return; // No spears available
 
-        const spearMaterial = new THREE.MeshPhysicalMaterial({
-          color: 0x00BFFF,
-          transparent: true,
-          opacity: 0.9,
-          roughness: 0.1,
-          metalness: 0.2,
-          clearcoat: 1.0,
-          clearcoatRoughness: 0.1,
-          transmission: 0.8,
-          ior: 1.33,
-          emissive: 0x0077BB,
-          emissiveIntensity: 0.5
-        });
+        const { spearGroup, trail, raycaster } = pooledSpear;
 
-        const spear = new THREE.Mesh(spearGeometry, spearMaterial);
-        spear.castShadow = true;
-        spearGroup.add(spear);
-
-        const glowGeometry = new THREE.CylinderGeometry(0.6, 0.3, 4.0, 16);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-          color: 0x00BFFF,
-          transparent: true,
-          opacity: 0.3,
-          side: THREE.BackSide,
-        });
-
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        spearGroup.add(glow);
-
+        // Position and orient the spear
         spearGroup.position.copy(characterPositionRef.current);
         spearGroup.position.y += 1.5;
 
@@ -175,47 +287,37 @@ export default function WaterBending({
         const quaternion = new THREE.Quaternion().setFromUnitVectors(up, direction);
         spearGroup.setRotationFromQuaternion(quaternion);
 
+        // Add to scene
         scene.add(spearGroup);
-
-        const trailGeometry = new THREE.BufferGeometry();
-        const trailParticles = 30;
-        const trailPositions = new Float32Array(trailParticles * 3);
-
-        for (let i = 0; i < trailParticles; i++) {
-          trailPositions[i * 3] = 0;
-          trailPositions[i * 3 + 1] = 0;
-          trailPositions[i * 3 + 2] = 0;
-        }
-
-        trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
-
-        const trailMaterial = new THREE.PointsMaterial({
-          color: 0x87CEFA,
-          size: 0.3,
-          transparent: true,
-          opacity: 0.6,
-          blending: THREE.AdditiveBlending,
-        });
-
-        const trail = new THREE.Points(trailGeometry, trailMaterial);
         scene.add(trail);
 
-        const createWaterDrops = (position: THREE.Vector3) => {
-          const dropGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-          const dropMaterial = new THREE.MeshPhysicalMaterial({
-            color: 0xADD8E6,
-            transparent: true,
-            opacity: 0.8,
-            roughness: 0.1,
-            metalness: 0.1,
-            clearcoat: 1.0,
-            clearcoatRoughness: 0.1,
-            transmission: 0.9,
-            ior: 1.33,
-          });
+        // Reset trail to spear position
+        const trailParticles = 30; // Same value used when creating the pool
+        const positions = trail.geometry.attributes.position.array as Float32Array;
+        for (let i = 0; i < trailParticles; i++) {
+          positions[i * 3] = spearGroup.position.x;
+          positions[i * 3 + 1] = spearGroup.position.y;
+          positions[i * 3 + 2] = spearGroup.position.z;
+        }
+        trail.geometry.attributes.position.needsUpdate = true;
 
+        const createWaterDrops = (position: THREE.Vector3) => {
           for (let i = 0; i < 10; i++) {
-            const drop = new THREE.Mesh(dropGeometry, dropMaterial);
+            // Use shared geometry and material for water drops
+            const drop = new THREE.Mesh(
+              dropGeometryRef.current || new THREE.SphereGeometry(0.3, 16, 16),
+              dropMaterialRef.current || new THREE.MeshPhysicalMaterial({
+                color: 0xADD8E6,
+                transparent: true,
+                opacity: 0.8,
+                roughness: 0.1,
+                metalness: 0.1,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.1,
+                transmission: 0.9,
+                ior: 1.33,
+              })
+            );
             drop.position.copy(position).add(
               new THREE.Vector3(
                 (Math.random() - 0.5) * 2,
@@ -243,34 +345,21 @@ export default function WaterBending({
 
         const updateSpear: IdentifiableFunction = (delta: number) => {
           if (Date.now() - creationTime > maxLifetime) {
-            scene.remove(spearGroup);
-            scene.remove(trail);
-            spearGeometry.dispose();
-            spearMaterial.dispose();
-            glowGeometry.dispose();
-            glowMaterial.dispose();
-            trailGeometry.dispose();
-            trailMaterial.dispose();
+            // Lifetime expired, return to pool
+            returnSpearToPool(pooledSpear);
             removeSpearUpdate();
             return;
           }
 
           const terrain = scene.getObjectByName('terrain');
           if (terrain) {
-            const raycaster = new THREE.Raycaster();
+            // Use the dedicated raycaster for this spear
             raycaster.set(spearGroup.position, direction);
             const intersects = raycaster.intersectObject(terrain, true);
             const distance = speed * delta;
             if (intersects.length > 0 && intersects[0].distance < distance) {
               createWaterDrops(intersects[0].point);
-              scene.remove(spearGroup);
-              scene.remove(trail);
-              spearGeometry.dispose();
-              spearMaterial.dispose();
-              glowGeometry.dispose();
-              glowMaterial.dispose();
-              trailGeometry.dispose();
-              trailMaterial.dispose();
+              returnSpearToPool(pooledSpear);
               removeSpearUpdate();
               return;
             }
@@ -524,10 +613,11 @@ export default function WaterBending({
 
         if (dropsToRemove.length > 0) {
           freeDropsRef.current = freeDropsRef.current.filter(d => !dropsToRemove.includes(d));
-          dropsToRemove.forEach(drop => {
-            drop.mesh.geometry.dispose();
-            (drop.mesh.material as THREE.Material).dispose();
-          });
+          // Don't dispose of shared geometries and materials
+          // dropsToRemove.forEach(drop => {
+          //   drop.mesh.geometry.dispose();
+          //   (drop.mesh.material as THREE.Material).dispose();
+          // });
         }
 
         // Handle water collection better
@@ -606,10 +696,29 @@ export default function WaterBending({
 
         freeDropsRef.current.forEach(drop => {
           scene.remove(drop.mesh);
-          drop.mesh.geometry.dispose();
-          (drop.mesh.material as THREE.Material).dispose();
+          // Don't dispose shared geometry and materials
         });
         freeDropsRef.current = [];
+
+        // Cleanup spear pool
+        spearPoolRef.current.forEach(spear => {
+          if (spear.inUse) {
+            scene.remove(spear.spearGroup);
+            scene.remove(spear.trail);
+          }
+          // Dispose of the unique geometry (trail geometry)
+          spear.trailGeometry.dispose();
+        });
+        spearPoolRef.current = [];
+
+        // Dispose shared water projectile resources
+        spearGeometryRef.current?.dispose();
+        spearMaterialRef.current?.dispose();
+        glowGeometryRef.current?.dispose();
+        glowMaterialRef.current?.dispose();
+        dropGeometryRef.current?.dispose();
+        dropMaterialRef.current?.dispose();
+        trailMaterialRef.current?.dispose();
 
         hammer.destroy();
         removeEffectsUpdate();
