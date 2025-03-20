@@ -20,6 +20,7 @@ interface WaterCollectionOptions {
   attractionStrength?: number;
   collectionDistance?: number;
   maxWaterCapacity?: number;
+  debug?: boolean;
 }
 
 /**
@@ -33,10 +34,11 @@ export function useWaterCollection(
   const {
     maxActive = 100,
     lifespan = 15000,
-    attractionDistance = 10,
-    attractionStrength = 20,
-    collectionDistance = 1.5,
-    maxWaterCapacity = 100
+    attractionDistance = 15, // Increased attraction distance
+    attractionStrength = 30, // Increased attraction strength
+    collectionDistance = 2.5, // Increased collection distance
+    maxWaterCapacity = 100,
+    debug = false
   } = options;
   
   // State for water amount
@@ -47,6 +49,9 @@ export function useWaterCollection(
   
   // Reference to active drops for updating
   const activeDropsRef = useRef<PhysicsObject[]>([]);
+  
+  // Reference to water specific objects in the scene for processing
+  const waterObjectsRef = useRef<THREE.Object3D[]>([]);
   
   // Initialize physics and pool on mount
   useEffect(() => {
@@ -88,6 +93,9 @@ export function useWaterCollection(
       maxActive
     );
     
+    // Find water objects in the scene
+    findWaterObjects(scene);
+    
     // Cleanup on unmount
     return () => {
       if (dropPoolRef.current) {
@@ -95,6 +103,30 @@ export function useWaterCollection(
       }
     };
   }, [scene, maxActive]);
+  
+  /**
+   * Find water objects in the scene by checking userData.isWater
+   */
+  const findWaterObjects = useCallback((sceneToSearch: THREE.Object3D) => {
+    // Reset array
+    waterObjectsRef.current = [];
+    
+    // Recursive function to find water objects
+    const traverse = (object: THREE.Object3D) => {
+      if (object.userData && object.userData.isWater) {
+        waterObjectsRef.current.push(object);
+      }
+      
+      object.children.forEach(traverse);
+    };
+    
+    // Start traversal
+    traverse(sceneToSearch);
+    
+    if (debug) {
+      console.log(`[WaterCollection] Found ${waterObjectsRef.current.length} water objects in scene`);
+    }
+  }, [debug]);
   
   /**
    * Create a new water drop
@@ -125,8 +157,12 @@ export function useWaterCollection(
     // Add to active drops
     activeDropsRef.current.push(waterDrop);
     
+    if (debug) {
+      console.log(`[WaterCollection] Created water drop at ${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}`);
+    }
+    
     return waterDrop;
-  }, [scene]);
+  }, [scene, debug]);
   
   /**
    * Update all active water drops and handle collection
@@ -152,24 +188,38 @@ export function useWaterCollection(
       
       // Apply attraction force if there's an attraction point
       if (attractionPoint) {
-        applyAttractionForce(
-          waterDrop.body,
-          attractionPoint,
-          attractionStrength,
-          attractionDistance
-        );
-        
-        // Check if water drop is collected (close enough to attraction point)
-        const distance = new THREE.Vector3(
+        // Get current drop position
+        const dropPosition = new THREE.Vector3(
           waterDrop.body.position.x,
           waterDrop.body.position.y,
           waterDrop.body.position.z
-        ).distanceTo(attractionPoint);
+        );
         
-        if (distance < collectionDistance) {
-          expired.push(waterDrop);
-          collected++;
-          continue;
+        // Calculate distance
+        const distance = dropPosition.distanceTo(attractionPoint);
+        
+        // Apply stronger attraction within range
+        if (distance < attractionDistance) {
+          // Apply attraction with stronger force for closer drops
+          const strengthMultiplier = 1.0 + (1.0 - distance / attractionDistance) * 2.0;
+          applyAttractionForce(
+            waterDrop.body,
+            attractionPoint,
+            attractionStrength * strengthMultiplier,
+            attractionDistance
+          );
+          
+          // Check if water drop is collected (close enough to attraction point)
+          if (distance < collectionDistance) {
+            expired.push(waterDrop);
+            collected++;
+            
+            if (debug) {
+              console.log(`[WaterCollection] Collected water drop at distance ${distance.toFixed(2)} (limit: ${collectionDistance})`);
+            }
+            
+            continue;
+          }
         }
       }
       
@@ -191,11 +241,56 @@ export function useWaterCollection(
     
     // Update water amount
     if (collected > 0) {
-      setWaterAmount(prev => Math.min(prev + collected, maxWaterCapacity));
+      setWaterAmount(prev => {
+        const newAmount = Math.min(prev + collected, maxWaterCapacity);
+        if (debug) {
+          console.log(`[WaterCollection] Water amount: ${prev} -> ${newAmount} (collected: ${collected})`);
+        }
+        return newAmount;
+      });
+    }
+    
+    // Auto-replenish drops from water objects in scene
+    if (Math.random() < 0.05 * delta && waterObjectsRef.current.length > 0) {
+      createDropsFromWaterObjects();
     }
     
     return collected;
-  }, [lifespan, attractionDistance, attractionStrength, collectionDistance, maxWaterCapacity]);
+  }, [lifespan, attractionDistance, attractionStrength, collectionDistance, maxWaterCapacity, createWaterDrop, debug]);
+  
+  /**
+   * Create water drops from water objects in the scene
+   */
+  const createDropsFromWaterObjects = useCallback(() => {
+    if (waterObjectsRef.current.length === 0) return;
+    
+    // Select a random water object
+    const waterObject = waterObjectsRef.current[
+      Math.floor(Math.random() * waterObjectsRef.current.length)
+    ];
+    
+    // Create a drop at a random point on its surface
+    const position = waterObject.position.clone();
+    
+    // If it's a mesh with geometry, try to get a random point on surface
+    if (waterObject instanceof THREE.Mesh && waterObject.geometry) {
+      // Add a small random offset
+      position.x += (Math.random() - 0.5) * 2;
+      position.z += (Math.random() - 0.5) * 2;
+      
+      // Adjust Y position to be slightly above the water object
+      position.y += 0.5;
+    }
+    
+    // Create the drop with a small upward velocity
+    const velocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.5,
+      1 + Math.random() * 0.5,
+      (Math.random() - 0.5) * 0.5
+    );
+    
+    createWaterDrop(position, velocity);
+  }, [createWaterDrop]);
   
   /**
    * Remove a specific water drop
@@ -234,11 +329,18 @@ export function useWaterCollection(
     setWaterAmount(Math.min(Math.max(amount, 0), maxWaterCapacity));
   }, [maxWaterCapacity]);
   
+  /**
+   * Get current water amount
+   */
+  const getWaterAmount = useCallback(() => {
+    return waterAmount;
+  }, [waterAmount]);
+  
   return {
     createWaterDrop,
     update,
     clear,
-    getWaterAmount: () => waterAmount,
+    getWaterAmount,
     setWaterAmount: setWaterAmountExplicit
   };
 } 

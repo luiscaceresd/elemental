@@ -1,40 +1,106 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 
-// Global physics world for water projectiles
+// Physics world for water simulation
 let physicsWorld: CANNON.World | null = null;
+const physicsBodies: CANNON.Body[] = [];
+
+// Constants
+const GRAVITY = -9.82;
+const DEFAULT_MASS = 0.1;
+const DEFAULT_RADIUS = 0.1;
+const DEFAULT_RESTITUTION = 0.3;
+const DEFAULT_FRICTION = 0.1;
+const DEFAULT_DAMPING = 0.7;
+const PHYSICS_UPDATE_FREQUENCY = 1 / 60; // 60 Hz
 
 /**
- * Initialize the physics world for water projectiles
+ * Initialize physics world with water-specific settings
  */
 export function initWaterPhysics(): CANNON.World {
-  // Create a new physics world if it doesn't exist
+  // Create world if it doesn't exist
   if (!physicsWorld) {
-    physicsWorld = new CANNON.World({
-      gravity: new CANNON.Vec3(0, -9.82, 0) // Earth gravity
-    });
+    physicsWorld = new CANNON.World();
+    physicsWorld.gravity.set(0, GRAVITY, 0);
     
-    // Set solver iterations for more stable physics
+    // Configure solver iterations
     physicsWorld.solver.iterations = 10;
     
-    // Allow bodies to sleep when at rest (performance optimization)
+    // Set up collision detection
+    physicsWorld.broadphase = new CANNON.NaiveBroadphase();
     physicsWorld.allowSleep = true;
-    
-    // Use SAPBroadphase for better performance with many objects
-    physicsWorld.broadphase = new CANNON.SAPBroadphase(physicsWorld);
   }
   
   return physicsWorld;
 }
 
 /**
- * Get the physics world, initializing it if needed
+ * Clean up physics simulation
  */
-export function getPhysicsWorld(): CANNON.World {
-  if (!physicsWorld) {
-    return initWaterPhysics();
+export function cleanupWaterPhysics(): void {
+  if (!physicsWorld) return;
+  
+  // Remove all bodies
+  while (physicsBodies.length > 0) {
+    const body = physicsBodies.pop();
+    if (body) {
+      physicsWorld.removeBody(body);
+    }
   }
-  return physicsWorld;
+  
+  physicsWorld = null;
+}
+
+/**
+ * Update physics world
+ */
+export function updateWaterPhysics(delta: number): void {
+  if (!physicsWorld) return;
+  
+  // Step the physics simulation with fixed timestep
+  const maxSubSteps = 3;
+  physicsWorld.step(PHYSICS_UPDATE_FREQUENCY, delta, maxSubSteps);
+}
+
+/**
+ * Create a physics body for a water drop
+ */
+export function createWaterDropBody(
+  position: THREE.Vector3,
+  velocity?: THREE.Vector3
+): CANNON.Body {
+  // Ensure physics world is initialized
+  if (!physicsWorld) {
+    initWaterPhysics();
+  }
+  
+  // Create spherical body
+  const shape = new CANNON.Sphere(DEFAULT_RADIUS);
+  const body = new CANNON.Body({
+    mass: DEFAULT_MASS,
+    shape,
+    position: new CANNON.Vec3(position.x, position.y, position.z),
+    linearDamping: DEFAULT_DAMPING,
+    angularDamping: DEFAULT_DAMPING
+  });
+  
+  // Set material properties
+  body.material = new CANNON.Material('water');
+  body.material.friction = DEFAULT_FRICTION;
+  body.material.restitution = DEFAULT_RESTITUTION;
+  
+  // Set initial velocity if provided
+  if (velocity) {
+    body.velocity.set(velocity.x, velocity.y, velocity.z);
+  }
+  
+  // Add body to world
+  if (physicsWorld) {
+    physicsWorld.addBody(body);
+    physicsBodies.push(body);
+  }
+  
+  return body;
 }
 
 /**
@@ -43,94 +109,100 @@ export function getPhysicsWorld(): CANNON.World {
 export function createWaterSpearBody(
   position: THREE.Vector3,
   direction: THREE.Vector3,
-  length: number = 2.5,
-  radius: number = 0.12
+  length = 1,
+  radius = 0.1,
+  speed = 20
 ): CANNON.Body {
-  const world = getPhysicsWorld();
+  // Ensure physics world is initialized
+  if (!physicsWorld) {
+    initWaterPhysics();
+  }
   
-  // Create cylinder shape
+  // Create cylindrical body
   const shape = new CANNON.Cylinder(radius, radius, length, 8);
-  
-  // Create physics material
-  const waterMaterial = new CANNON.Material('water');
-  
-  // Create body
   const body = new CANNON.Body({
-    mass: 1, // Mass in kg
+    mass: DEFAULT_MASS * 2, // Heavier than drops
+    shape,
     position: new CANNON.Vec3(position.x, position.y, position.z),
-    shape: shape,
-    material: waterMaterial
+    linearDamping: DEFAULT_DAMPING * 0.5 // Less dampened than drops
   });
   
-  // Set initial velocity based on direction
-  const speed = 15; // Speed in m/s
-  body.velocity.set(
+  // Rotate cylinder to align with direction
+  const quat = new CANNON.Quaternion();
+  const upVector = new CANNON.Vec3(0, 1, 0);
+  const directionVec = new CANNON.Vec3(direction.x, direction.y, direction.z);
+  
+  // First normalize the direction
+  directionVec.normalize();
+  
+  // Calculate rotation from up vector to direction
+  if (Math.abs(directionVec.dot(upVector) - 1) > 0.001) {
+    // If not parallel to up vector, compute rotation
+    const crossProduct = new CANNON.Vec3();
+    crossProduct.copy(upVector);
+    crossProduct.cross(directionVec);
+    
+    if (crossProduct.length() > 0.001) {
+      crossProduct.normalize();
+      const angle = Math.acos(upVector.dot(directionVec));
+      quat.setFromAxisAngle(crossProduct, angle);
+      body.quaternion.copy(quat);
+    }
+  }
+  
+  // Set velocity along direction
+  const velocity = new CANNON.Vec3(
     direction.x * speed,
     direction.y * speed,
     direction.z * speed
   );
+  body.velocity.copy(velocity);
   
-  // Rotate body to align with direction
-  const yAxis = new CANNON.Vec3(0, 1, 0);
-  const zAxis = new CANNON.Vec3(0, 0, 1);
-  
-  // Convert direction to CANNON Vec3
-  const dirVec = new CANNON.Vec3(direction.x, direction.y, direction.z);
-  
-  if (dirVec.length() > 0) {
-    const angle = Math.atan2(dirVec.z, dirVec.x);
-    const quaternion = new CANNON.Quaternion();
-    quaternion.setFromAxisAngle(yAxis, angle - Math.PI / 2);
-    body.quaternion = quaternion;
-  }
+  // Set material properties
+  body.material = new CANNON.Material('water');
+  body.material.friction = DEFAULT_FRICTION;
+  body.material.restitution = DEFAULT_RESTITUTION;
   
   // Add body to world
-  world.addBody(body);
-  
-  return body;
-}
-
-/**
- * Create a physics body for a water drop
- */
-export function createWaterDropBody(
-  position: THREE.Vector3,
-  velocity?: THREE.Vector3,
-  radius: number = 0.1
-): CANNON.Body {
-  const world = getPhysicsWorld();
-  
-  // Create sphere shape
-  const shape = new CANNON.Sphere(radius);
-  
-  // Create physics material
-  const waterMaterial = new CANNON.Material('water');
-  
-  // Create body
-  const body = new CANNON.Body({
-    mass: 0.5, // Mass in kg
-    position: new CANNON.Vec3(position.x, position.y, position.z),
-    shape: shape,
-    material: waterMaterial
-  });
-  
-  // Set initial velocity if provided
-  if (velocity) {
-    body.velocity.set(velocity.x, velocity.y, velocity.z);
-  }
-  
-  // Add body to world
-  world.addBody(body);
-  
-  return body;
-}
-
-/**
- * Update the physics world
- */
-export function updateWaterPhysics(deltaTime: number): void {
   if (physicsWorld) {
-    physicsWorld.step(deltaTime);
+    physicsWorld.addBody(body);
+    physicsBodies.push(body);
+  }
+  
+  return body;
+}
+
+/**
+ * Apply attraction force to a body
+ */
+export function applyAttractionForce(
+  body: CANNON.Body,
+  attractionPoint: THREE.Vector3,
+  strength: number,
+  maxDistance: number
+): void {
+  // Calculate direction to attraction point
+  const direction = new CANNON.Vec3(
+    attractionPoint.x - body.position.x,
+    attractionPoint.y - body.position.y,
+    attractionPoint.z - body.position.z
+  );
+  
+  const distance = direction.length();
+  
+  // Only apply force if within range
+  if (distance <= maxDistance && distance > 0) {
+    // Normalize direction vector
+    direction.normalize();
+    
+    // Calculate force strength (stronger when closer)
+    const forceMagnitude = strength * (1 - distance / maxDistance);
+    
+    // Create force vector
+    direction.scale(forceMagnitude, direction);
+    
+    // Apply force at center of mass
+    body.applyForce(direction, body.position);
   }
 }
 
@@ -138,66 +210,40 @@ export function updateWaterPhysics(deltaTime: number): void {
  * Remove a body from the physics world
  */
 export function removeBodyFromWorld(body: CANNON.Body): void {
-  if (physicsWorld) {
-    physicsWorld.removeBody(body);
+  if (!physicsWorld) return;
+  
+  // Remove from world
+  physicsWorld.removeBody(body);
+  
+  // Remove from tracked bodies
+  const index = physicsBodies.indexOf(body);
+  if (index !== -1) {
+    physicsBodies.splice(index, 1);
   }
 }
 
 /**
- * Clean up the physics world
- */
-export function cleanupWaterPhysics(): void {
-  if (physicsWorld) {
-    // Remove all bodies
-    while (physicsWorld.bodies.length > 0) {
-      physicsWorld.removeBody(physicsWorld.bodies[0]);
-    }
-    
-    // Reset world
-    physicsWorld = null;
-  }
-}
-
-/**
- * Check if a body is colliding with terrain
+ * Check collision with terrain
  */
 export function checkTerrainCollision(
-  body: { position: { x: number, y: number, z: number } },
+  body: CANNON.Body,
   terrainHeightFn?: (x: number, z: number) => number
 ): boolean {
   if (!terrainHeightFn) return false;
   
+  // Get terrain height at body position
   const terrainHeight = terrainHeightFn(body.position.x, body.position.z);
-  return body.position.y <= terrainHeight;
-}
-
-/**
- * Apply an attraction force to a body towards a target position
- */
-export function applyAttractionForce(
-  body: CANNON.Body,
-  targetPosition: THREE.Vector3,
-  strength: number = 10,
-  maxDistance: number = 10
-): void {
-  // Calculate distance vector
-  const bodyPos = body.position;
-  const distanceVector = new CANNON.Vec3(
-    targetPosition.x - bodyPos.x,
-    targetPosition.y - bodyPos.y,
-    targetPosition.z - bodyPos.z
-  );
   
-  const distance = distanceVector.length();
-  
-  // Apply force if within range
-  if (distance > 0 && distance < maxDistance) {
-    // Normalize and scale by strength and inverse distance
-    distanceVector.normalize();
-    const forceMagnitude = strength * (1 - distance / maxDistance);
-    distanceVector.scale(forceMagnitude, distanceVector);
+  // Check if body is below terrain
+  if (body.position.y - DEFAULT_RADIUS < terrainHeight) {
+    // Adjust position to be on terrain
+    body.position.y = terrainHeight + DEFAULT_RADIUS;
     
-    // Apply force to center of body
-    body.applyForce(distanceVector, bodyPos);
+    // Reset vertical velocity with some damping
+    body.velocity.y = Math.max(0, body.velocity.y * -DEFAULT_RESTITUTION);
+    
+    return true;
   }
+  
+  return false;
 } 

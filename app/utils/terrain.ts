@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 
-// Initialize simplex noise
+// Create noise generator with a random seed
 const noise2D = createNoise2D();
 
 // Terrain configuration
@@ -11,39 +11,63 @@ const TERRAIN_DETAIL = 0.01; // Level of detail (frequency)
 const TERRAIN_OCTAVES = 4; // Number of noise layers
 
 /**
- * Get the height of the terrain at a given x,z position
- * 
- * @param x - X coordinate
- * @param z - Z coordinate 
- * @returns The height (y value) at the specified position
+ * Get terrain height at a given position
+ * @param x X coordinate
+ * @param z Z coordinate
+ * @returns Height value at the given position
  */
 export function getTerrainHeight(x: number, z: number): number {
+  // Base y-level
+  let baseY = 0;
+  
+  // Scale factors for different noise frequencies
+  const scale1 = 0.02; // Large scale features
+  const scale2 = 0.1;  // Medium scale features
+  const scale3 = 0.3;  // Small scale features
+  
+  // Track maximum possible amplitude
+  let maxAmplitude = 0;
   let height = 0;
   
-  // Apply multiple octaves of noise for more natural terrain
-  let amplitude = 1.0;
-  let frequency = TERRAIN_DETAIL;
-  let maxAmplitude = 0;
+  // Apply multiple octaves of noise for natural looking terrain
+  const amplitude1 = 10.0;
+  maxAmplitude += amplitude1;
+  height += noise2D(x * scale1, z * scale1) * amplitude1;
   
-  for (let i = 0; i < TERRAIN_OCTAVES; i++) {
-    // Add noise sample with current frequency and amplitude
-    height += noise2D(x * frequency, z * frequency) * amplitude;
-    
-    // Keep track of maximum possible amplitude
-    maxAmplitude += amplitude;
-    
-    // Next octave: higher frequency, lower amplitude
-    amplitude *= 0.5;
-    frequency *= 2.0;
+  const amplitude2 = 3.0;
+  maxAmplitude += amplitude2;
+  height += noise2D(x * scale2, z * scale2) * amplitude2;
+  
+  const amplitude3 = 1.0;
+  maxAmplitude += amplitude3;
+  height += noise2D(x * scale3, z * scale3) * amplitude3;
+  
+  // Normalize height to [0, 1] range
+  const normalizedHeight = (height + maxAmplitude) / (maxAmplitude * 2);
+  
+  // Apply scaling for final terrain height
+  const finalHeight = baseY + normalizedHeight * 20 - 10;
+  
+  // Create a depression for pond at position 20,20
+  const pondX = 20;
+  const pondZ = 20;
+  const pondRadius = 15;
+  const pondDepth = 3;
+  
+  const distanceToPond = Math.sqrt((x - pondX) ** 2 + (z - pondZ) ** 2);
+  if (distanceToPond < pondRadius) {
+    // Apply a smooth depression for the pond
+    const pondFactor = 1 - Math.pow(distanceToPond / pondRadius, 2);
+    const depression = pondDepth * pondFactor;
+    return finalHeight - depression;
   }
   
-  // Normalize to the range [0, 1]
-  height = height / maxAmplitude;
+  // Expose function on window for other components to use
+  if (typeof window !== 'undefined') {
+    (window as any).getTerrainHeight = getTerrainHeight;
+  }
   
-  // Scale to desired height
-  height = height * TERRAIN_HEIGHT;
-  
-  return height;
+  return finalHeight;
 }
 
 /**

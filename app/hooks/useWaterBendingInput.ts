@@ -56,7 +56,10 @@ export function useWaterBendingInput(
   });
 
   // Use refs to track current state in event handlers without dependencies
-  const inputStateRef = useRef(inputState);
+  const inputStateRef = useRef<InputState>(inputState);
+  // Store click position as a separate ref to avoid triggering renders on mouse move
+  const clickPositionRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  
   useEffect(() => {
     inputStateRef.current = inputState;
   }, [inputState]);
@@ -113,35 +116,33 @@ export function useWaterBendingInput(
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       
+      // Update refs directly to avoid renders
+      clickPositionRef.current.set(x, y);
+      
+      // Perform single state update with all changes
       setInputState(prev => ({
         ...prev,
         isClicking: true,
-        clickPosition: new THREE.Vector2(x, y)
+        isCharging: true,
+        clickPosition: new THREE.Vector2(x, y),
+        chargeStartTime: Date.now(),
+        chargePosition: new THREE.Vector2(x, y)
       }));
       
       // Start charging
       actions.onStartCharging();
-      
-      setInputState(prev => ({
-        ...prev,
-        isCharging: true,
-        chargeStartTime: Date.now(),
-        chargePosition: new THREE.Vector2(x, y)
-      }));
     };
     
     const handleMouseMove = (e: MouseEvent) => {
-      // Use the ref to check current state instead of the dependency
+      // Use the ref to check current state
       if (!inputStateRef.current.isClicking) return;
       
       const rect = (e.target as HTMLElement).getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       
-      setInputState(prev => ({
-        ...prev,
-        clickPosition: new THREE.Vector2(x, y)
-      }));
+      // Update ref directly without triggering state update
+      clickPositionRef.current.set(x, y);
       
       // Calculate world ray and perform move action
       updateRayDirection(x, y);
@@ -149,24 +150,23 @@ export function useWaterBendingInput(
         const playerPosition = getPlayerPosition();
         actions.onMove(playerPosition);
       }
+      
+      // DO NOT update state here to avoid infinite loops
+      // State will be updated in the update function
     };
     
     const handleMouseUp = (e: MouseEvent) => {
-      // Use the ref to check current state instead of the dependency
+      // Use the ref to check current state
       if (!inputStateRef.current.isClicking) return;
       
       const rect = (e.target as HTMLElement).getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       
-      // Reset clicking state
-      setInputState(prev => ({
-        ...prev,
-        isClicking: false,
-        clickPosition: new THREE.Vector2(x, y)
-      }));
+      // Update ref
+      clickPositionRef.current.set(x, y);
       
-      // If we were charging, shoot
+      // If we were charging, shoot first
       if (inputStateRef.current.isCharging) {
         // Calculate direction and shoot
         updateRayDirection(x, y);
@@ -174,16 +174,18 @@ export function useWaterBendingInput(
         if (rayDirection.current) {
           actions.onShoot(rayDirection.current);
         }
-        
-        // Reset charging state
-        setInputState(prev => ({
-          ...prev,
-          isCharging: false,
-          chargeStartTime: null,
-          chargePosition: null,
-          chargeLevel: 0
-        }));
       }
+      
+      // Reset state in a single update
+      setInputState(prev => ({
+        ...prev,
+        isClicking: false,
+        isCharging: false,
+        chargeStartTime: null,
+        chargePosition: null,
+        chargeLevel: 0,
+        clickPosition: new THREE.Vector2(x, y)
+      }));
     };
     
     const handleTouchStart = (e: TouchEvent) => {
@@ -194,21 +196,21 @@ export function useWaterBendingInput(
       const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
       
+      // Update ref directly
+      clickPositionRef.current.set(x, y);
+      
+      // Set state in single update
       setInputState(prev => ({
         ...prev,
         isClicking: true,
-        clickPosition: new THREE.Vector2(x, y)
+        isCharging: true,
+        clickPosition: new THREE.Vector2(x, y),
+        chargeStartTime: Date.now(),
+        chargePosition: new THREE.Vector2(x, y)
       }));
       
       // Start charging
       actions.onStartCharging();
-      
-      setInputState(prev => ({
-        ...prev,
-        isCharging: true,
-        chargeStartTime: Date.now(),
-        chargePosition: new THREE.Vector2(x, y)
-      }));
     };
     
     const handleTouchMove = (e: TouchEvent) => {
@@ -219,10 +221,8 @@ export function useWaterBendingInput(
       const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
       const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
       
-      setInputState(prev => ({
-        ...prev,
-        clickPosition: new THREE.Vector2(x, y)
-      }));
+      // Update ref directly without state update
+      clickPositionRef.current.set(x, y);
       
       // Calculate world ray and perform move action
       updateRayDirection(x, y);
@@ -230,22 +230,18 @@ export function useWaterBendingInput(
         const playerPosition = getPlayerPosition();
         actions.onMove(playerPosition);
       }
+      
+      // DO NOT update state here to avoid infinite loops
     };
     
     const handleTouchEnd = (e: TouchEvent) => {
       if (!inputStateRef.current.isClicking) return;
       
-      // Use last known position
-      const x = inputStateRef.current.clickPosition.x;
-      const y = inputStateRef.current.clickPosition.y;
+      // Use last known position from ref
+      const x = clickPositionRef.current.x;
+      const y = clickPositionRef.current.y;
       
-      // Reset clicking state
-      setInputState(prev => ({
-        ...prev,
-        isClicking: false
-      }));
-      
-      // If we were charging, shoot
+      // If we were charging, shoot first
       if (inputStateRef.current.isCharging) {
         // Calculate direction and shoot
         updateRayDirection(x, y);
@@ -253,16 +249,17 @@ export function useWaterBendingInput(
         if (rayDirection.current) {
           actions.onShoot(rayDirection.current);
         }
-        
-        // Reset charging state
-        setInputState(prev => ({
-          ...prev,
-          isCharging: false,
-          chargeStartTime: null,
-          chargePosition: null,
-          chargeLevel: 0
-        }));
       }
+      
+      // Reset state in a single update
+      setInputState(prev => ({
+        ...prev,
+        isClicking: false,
+        isCharging: false,
+        chargeStartTime: null,
+        chargePosition: null,
+        chargeLevel: 0
+      }));
     };
     
     const handleCancel = () => {
@@ -270,6 +267,7 @@ export function useWaterBendingInput(
       if (inputStateRef.current.isCharging) {
         actions.onCancelCharging();
         
+        // Reset state
         setInputState(prev => ({
           ...prev,
           isClicking: false,
@@ -310,6 +308,17 @@ export function useWaterBendingInput(
    * Update input state (called in animation frame)
    */
   const update = useCallback((delta: number) => {
+    // Only update clickPosition from ref when needed (once per frame max)
+    if (inputStateRef.current.isClicking && 
+        (clickPositionRef.current.x !== inputStateRef.current.clickPosition.x || 
+         clickPositionRef.current.y !== inputStateRef.current.clickPosition.y)) {
+      
+      setInputState(prev => ({
+        ...prev,
+        clickPosition: clickPositionRef.current.clone()
+      }));
+    }
+    
     // Update charge level if charging
     if (inputStateRef.current.isCharging && inputStateRef.current.chargeStartTime) {
       const chargeTime = Date.now() - inputStateRef.current.chargeStartTime;
