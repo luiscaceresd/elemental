@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import SimplexNoise from 'simplex-noise';
+import { createNoise2D } from 'simplex-noise';
 
 // Initialize simplex noise
-const simplex = new SimplexNoise();
+const noise2D = createNoise2D();
 
 // Terrain configuration
 const TERRAIN_SCALE = 100; // Scale of the overall terrain
@@ -19,24 +19,29 @@ const TERRAIN_OCTAVES = 4; // Number of noise layers
  */
 export function getTerrainHeight(x: number, z: number): number {
   let height = 0;
-  let amplitude = 1;
-  let frequency = TERRAIN_DETAIL;
   
-  // Sum multiple octaves of noise for more natural terrain
+  // Apply multiple octaves of noise for more natural terrain
+  let amplitude = 1.0;
+  let frequency = TERRAIN_DETAIL;
+  let maxAmplitude = 0;
+  
   for (let i = 0; i < TERRAIN_OCTAVES; i++) {
-    // Get noise value at this position and frequency
-    const noiseValue = simplex.noise2D(x * frequency, z * frequency);
+    // Add noise sample with current frequency and amplitude
+    height += noise2D(x * frequency, z * frequency) * amplitude;
     
-    // Add to total height
-    height += noiseValue * amplitude;
+    // Keep track of maximum possible amplitude
+    maxAmplitude += amplitude;
     
-    // Adjust for next octave
+    // Next octave: higher frequency, lower amplitude
     amplitude *= 0.5;
-    frequency *= 2;
+    frequency *= 2.0;
   }
   
-  // Scale to desired height range and normalize to 0-1 range first
-  height = (height + 1) * 0.5 * TERRAIN_HEIGHT;
+  // Normalize to the range [0, 1]
+  height = height / maxAmplitude;
+  
+  // Scale to desired height
+  height = height * TERRAIN_HEIGHT;
   
   return height;
 }

@@ -1,15 +1,17 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
-import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { WaterBendingMain } from './water/WaterBendingMain';
 
 interface WaterBendingProps {
-  player: {
-    position: THREE.Vector3;
-    rotation: THREE.Euler;
-  };
+  scene: THREE.Scene;
+  camera: THREE.Camera;
+  domElement: HTMLCanvasElement;
+  registerUpdate: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
+  isBendingRef: React.RefObject<boolean>;
+  crosshairPositionRef: React.RefObject<THREE.Vector3>;
+  characterPositionRef: React.RefObject<THREE.Vector3>;
 }
 
 /**
@@ -17,11 +19,25 @@ interface WaterBendingProps {
  * This acts as a wrapper for the refactored WaterBendingMain component
  * which contains the core water bending functionality
  */
-export function WaterBending({ player }: WaterBendingProps) {
-  const { camera, scene } = useThree();
-  
+export function WaterBending({
+  scene,
+  camera,
+  domElement,
+  registerUpdate,
+  characterPositionRef,
+  isBendingRef,
+  crosshairPositionRef
+}: WaterBendingProps) {
   // Environment objects (would be populated in a real implementation)
   const environmentObjects = useRef<THREE.Object3D[]>([]);
+  
+  // Create a reactive player object that updates with the character position
+  const player = {
+    get position() {
+      return characterPositionRef.current || new THREE.Vector3();
+    },
+    rotation: new THREE.Euler()
+  };
   
   // Render the water bending functionality
   return (
@@ -30,6 +46,8 @@ export function WaterBending({ player }: WaterBendingProps) {
       player={player}
       scene={scene}
       environmentObjects={environmentObjects.current}
+      registerUpdate={registerUpdate}
+      domElement={domElement}
     />
   );
 }

@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
-import { WaterMeter } from '../WaterMeter';
+import WaterMeter from '../WaterMeter';
 import { useWaterProjectiles } from '../../hooks/useWaterProjectiles';
 import { useWaterCollection } from '../../hooks/useWaterCollection';
 import { useWaterBeltEffect } from '../../hooks/useWaterBeltEffect';
@@ -16,6 +15,8 @@ interface WaterBendingProps {
   };
   scene: THREE.Scene;
   environmentObjects?: THREE.Object3D[];
+  registerUpdate?: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
+  domElement?: HTMLCanvasElement;
 }
 
 /**
@@ -27,7 +28,14 @@ interface WaterBendingProps {
  * - Input handling
  * - Water meter UI
  */
-export function WaterBendingMain({ camera, player, scene, environmentObjects = [] }: WaterBendingProps) {
+export function WaterBendingMain({ 
+  camera, 
+  player, 
+  scene, 
+  environmentObjects = [],
+  registerUpdate,
+  domElement
+}: WaterBendingProps) {
   // Configuration constants
   const MAX_WATER_CAPACITY = 100;
   const WATER_COST_PER_SPEAR = 20;
@@ -71,9 +79,11 @@ export function WaterBendingMain({ camera, player, scene, environmentObjects = [
   // Input actions
   const inputActions = {
     onStartCharging: useCallback(() => {
-      // Show water belt if we have enough water
+      // Always set bending to true to enable water collection
+      setIsBending(true);
+      
+      // Only show water belt if we have enough water
       if (waterRef.current >= WATER_COST_PER_SPEAR) {
-        setIsBending(true);
         beltSystem.setVisibility(true);
       }
     }, [beltSystem]),
@@ -109,7 +119,6 @@ export function WaterBendingMain({ camera, player, scene, environmentObjects = [
         
         // Hide belt if not enough water left
         if (newWaterAmount < WATER_COST_PER_SPEAR) {
-          setIsBending(false);
           beltSystem.setVisibility(false);
         }
       }
@@ -124,7 +133,7 @@ export function WaterBendingMain({ camera, player, scene, environmentObjects = [
   const inputSystem = useWaterBendingInput(inputActions, {
     camera,
     cameraDistance: 5,
-    canvas: document.querySelector('canvas') as HTMLCanvasElement
+    canvas: domElement
   });
   
   // Keep waterRef in sync with waterAmount
@@ -133,8 +142,8 @@ export function WaterBendingMain({ camera, player, scene, environmentObjects = [
     collectionSystem.setWaterAmount(waterAmount);
   }, [waterAmount, collectionSystem]);
   
-  // Main update loop
-  useFrame((state, delta) => {
+  // Create update function for the animation loop
+  const updateFunction = useCallback((delta: number) => {
     // Update projectiles
     projectileSystem.update(delta);
     
@@ -159,9 +168,18 @@ export function WaterBendingMain({ camera, player, scene, environmentObjects = [
     }
     
     // Generate water drops if there's a water source nearby
-    // This would be environment-dependent logic for water sources
     generateEnvironmentWaterDrops(delta);
-  });
+  }, [projectileSystem, inputSystem, isBending, player.position, collectionSystem, beltSystem, waterAmount]);
+  
+  // Register the update function if we have the registerUpdate prop
+  useEffect(() => {
+    if (registerUpdate) {
+      // Add an ID to the function for debugging
+      updateFunction._id = 'waterBending';
+      const unregister = registerUpdate(updateFunction);
+      return unregister;
+    }
+  }, [registerUpdate, updateFunction]);
   
   // Generate water drops from environment
   const generateEnvironmentWaterDrops = useCallback((delta: number) => {

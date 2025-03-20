@@ -54,11 +54,51 @@ export function useWaterBendingInput(
     chargePosition: null,
     chargeLevel: 0
   });
+
+  // Use refs to track current state in event handlers without dependencies
+  const inputStateRef = useRef(inputState);
+  useEffect(() => {
+    inputStateRef.current = inputState;
+  }, [inputState]);
   
   // Raycaster for 3D position calculation
   const raycaster = useRef(new THREE.Raycaster());
   const rayDirection = useRef<THREE.Vector3 | null>(null);
   const targetElement = useRef<HTMLElement | null>(null);
+  
+  /**
+   * Update the ray direction based on cursor position
+   */
+  const updateRayDirection = useCallback((x: number, y: number) => {
+    if (!camera) {
+      rayDirection.current = null;
+      return;
+    }
+    
+    // Update raycaster
+    raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera);
+    
+    // Get ray direction
+    rayDirection.current = raycaster.current.ray.direction.clone();
+  }, [camera]);
+  
+  /**
+   * Get player position (estimated from camera)
+   */
+  const getPlayerPosition = useCallback(() => {
+    if (!camera) {
+      return new THREE.Vector3(0, 0, 0);
+    }
+    
+    // Calculate player position based on camera
+    const position = camera.position.clone();
+    const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    
+    // Player is in front of the camera
+    position.add(direction.multiplyScalar(cameraDistance));
+    
+    return position;
+  }, [camera, cameraDistance]);
   
   // Initialize event handlers
   useEffect(() => {
@@ -91,7 +131,8 @@ export function useWaterBendingInput(
     };
     
     const handleMouseMove = (e: MouseEvent) => {
-      if (!inputState.isClicking) return;
+      // Use the ref to check current state instead of the dependency
+      if (!inputStateRef.current.isClicking) return;
       
       const rect = (e.target as HTMLElement).getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -111,7 +152,8 @@ export function useWaterBendingInput(
     };
     
     const handleMouseUp = (e: MouseEvent) => {
-      if (!inputState.isClicking) return;
+      // Use the ref to check current state instead of the dependency
+      if (!inputStateRef.current.isClicking) return;
       
       const rect = (e.target as HTMLElement).getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -125,7 +167,7 @@ export function useWaterBendingInput(
       }));
       
       // If we were charging, shoot
-      if (inputState.isCharging) {
+      if (inputStateRef.current.isCharging) {
         // Calculate direction and shoot
         updateRayDirection(x, y);
         
@@ -170,7 +212,7 @@ export function useWaterBendingInput(
     };
     
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 0 || !inputState.isClicking) return;
+      if (e.touches.length === 0 || !inputStateRef.current.isClicking) return;
       
       const touch = e.touches[0];
       const rect = (e.target as HTMLElement).getBoundingClientRect();
@@ -191,11 +233,11 @@ export function useWaterBendingInput(
     };
     
     const handleTouchEnd = (e: TouchEvent) => {
-      if (!inputState.isClicking) return;
+      if (!inputStateRef.current.isClicking) return;
       
       // Use last known position
-      const x = inputState.clickPosition.x;
-      const y = inputState.clickPosition.y;
+      const x = inputStateRef.current.clickPosition.x;
+      const y = inputStateRef.current.clickPosition.y;
       
       // Reset clicking state
       setInputState(prev => ({
@@ -204,7 +246,7 @@ export function useWaterBendingInput(
       }));
       
       // If we were charging, shoot
-      if (inputState.isCharging) {
+      if (inputStateRef.current.isCharging) {
         // Calculate direction and shoot
         updateRayDirection(x, y);
         
@@ -225,7 +267,7 @@ export function useWaterBendingInput(
     
     const handleCancel = () => {
       // Cancel charging
-      if (inputState.isCharging) {
+      if (inputStateRef.current.isCharging) {
         actions.onCancelCharging();
         
         setInputState(prev => ({
@@ -262,59 +304,28 @@ export function useWaterBendingInput(
       element.removeEventListener('touchend', handleTouchEnd);
       element.removeEventListener('touchcancel', handleCancel);
     };
-  }, [actions, canvas, inputState.isCharging, inputState.isClicking, inputState.clickPosition]);
-  
-  /**
-   * Update the ray direction based on cursor position
-   */
-  const updateRayDirection = useCallback((x: number, y: number) => {
-    if (!camera) {
-      rayDirection.current = null;
-      return;
-    }
-    
-    // Update raycaster
-    raycaster.current.setFromCamera(new THREE.Vector2(x, y), camera);
-    
-    // Get ray direction
-    rayDirection.current = raycaster.current.ray.direction.clone();
-  }, [camera]);
-  
-  /**
-   * Get player position (estimated from camera)
-   */
-  const getPlayerPosition = useCallback(() => {
-    if (!camera) {
-      return new THREE.Vector3(0, 0, 0);
-    }
-    
-    // Calculate player position based on camera
-    const position = camera.position.clone();
-    const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    
-    // Player is in front of the camera
-    position.add(direction.multiplyScalar(cameraDistance));
-    
-    return position;
-  }, [camera, cameraDistance]);
+  }, [actions, canvas, updateRayDirection, getPlayerPosition]);
   
   /**
    * Update input state (called in animation frame)
    */
   const update = useCallback((delta: number) => {
     // Update charge level if charging
-    if (inputState.isCharging && inputState.chargeStartTime) {
-      const chargeTime = Date.now() - inputState.chargeStartTime;
+    if (inputStateRef.current.isCharging && inputStateRef.current.chargeStartTime) {
+      const chargeTime = Date.now() - inputStateRef.current.chargeStartTime;
       const maxChargeTime = 2000; // 2 seconds to full charge
       
       const newChargeLevel = Math.min(chargeTime / maxChargeTime, 1);
       
-      setInputState(prev => ({
-        ...prev,
-        chargeLevel: newChargeLevel
-      }));
+      // Only update if the value has changed significantly to reduce renders
+      if (Math.abs(newChargeLevel - inputStateRef.current.chargeLevel) > 0.01) {
+        setInputState(prev => ({
+          ...prev,
+          chargeLevel: newChargeLevel
+        }));
+      }
     }
-  }, [inputState.isCharging, inputState.chargeStartTime]);
+  }, []);
   
   /**
    * Get current input state
