@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import CharacterController from './CharacterController';
 import CameraController from './CameraController';
-import WaterBending from './WaterBending';
+import { WaterBending } from './WaterBending';
 import MobileControls from './MobileControls';
 import World from './World';
 import Pond from './Pond';
