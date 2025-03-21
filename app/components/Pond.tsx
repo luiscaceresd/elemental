@@ -48,6 +48,7 @@ export default function Pond({ position, size, depth, scene, isBendingRef, cross
     
     // Optimize physics world
     world.broadphase = new CANNON.NaiveBroadphase();
+    // @ts-expect-error - Property exists at runtime but not in type definition
     world.solver.iterations = 5; // Reduced iterations for performance
     world.allowSleep = true;
     
@@ -178,12 +179,12 @@ export default function Pond({ position, size, depth, scene, isBendingRef, cross
     };
   }, [scene, position, size, depth]);
 
-  // Update function for the water animation and physics
+  // Update function for water animation and collection effect
   useEffect(() => {
     if (!isLoaded || !registerUpdate) return;
 
-      const updatePond = (delta: number) => {
-        if (delta > 0.1) return; // Skip large deltas
+    const updatePond = (delta: number) => {
+      if (delta > 0.1) return; // Skip large deltas
 
       // Update physics world
       const world = physicsWorldRef.current;

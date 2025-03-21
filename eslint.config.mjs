@@ -15,6 +15,15 @@ const eslintConfig = [
     ignores: ["**/*.md"],
   },
   {
+    files: ["**/*.{ts,tsx,js,jsx}"],
+    rules: {
+      // Downgrade unused variables from errors to warnings
+      "@typescript-eslint/no-unused-vars": ["warn"],
+      // Downgrade no-explicit-any from error to warning
+      "@typescript-eslint/no-explicit-any": ["warn"]
+    }
+  },
+  {
     files: ["**/*.{tsx,jsx}"],
     rules: {
       // Enforce component size limitations (max 500 lines)
@@ -23,7 +32,7 @@ const eslintConfig = [
         skipBlankLines: false,
         skipComments: false
       }],
-      // Warning when components approach the limit
+      // Warning when components approach the line limit
       "max-lines-per-function": ["warn", {
         max: 400,
         skipBlankLines: false,

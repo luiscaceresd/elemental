@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useEffect } from 'react';
+import { useRef } from 'react';
 import * as THREE from 'three';
 import { WaterBendingMain } from './water/WaterBendingMain';
 

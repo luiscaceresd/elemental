@@ -310,7 +310,7 @@ export function useWaterBendingInput(
   const update = useCallback((delta: number) => {
     // Use a local variable to track if we need to update state
     let needsStateUpdate = false;
-    let stateUpdates = {} as Partial<InputState>;
+    const stateUpdates = {} as Partial<InputState>;
     
     // Only update clickPosition from ref when needed (once per frame max)
     if (inputStateRef.current.isClicking && 

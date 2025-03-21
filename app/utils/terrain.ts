@@ -18,7 +18,7 @@ const TERRAIN_OCTAVES = 4; // Number of noise layers
  */
 export function getTerrainHeight(x: number, z: number): number {
   // Base y-level
-  let baseY = 0;
+  const baseY = 0;
   
   // Scale factors for different noise frequencies
   const scale1 = 0.02; // Large scale features
@@ -62,10 +62,10 @@ export function getTerrainHeight(x: number, z: number): number {
     return finalHeight - depression;
   }
   
-  // Expose function on window for other components to use
-  if (typeof window !== 'undefined') {
-    (window as any).getTerrainHeight = getTerrainHeight;
-  }
+  // Comment out this window assignment to avoid conflicts with World.tsx
+  // if (typeof window !== 'undefined') {
+  //   (window as any).getTerrainHeight = getTerrainHeight;
+  // }
   
   return finalHeight;
 }

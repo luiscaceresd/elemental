@@ -64,9 +64,17 @@ export class ObjectPool<T> {
       
       if (this.active.size > 0) {
         // Find and release the first active object
-        object = this.active.values().next().value;
-        this.release(object);
-        object = this.available.pop()!; // Get the object we just released
+        const next = this.active.values().next();
+        if (next.done) {
+          // Fallback case (should not happen with size > 0)
+          object = this.createFn();
+          this.objects.push(object);
+        } else {
+          // Safely get the value which we now know exists
+          object = next.value;
+          this.release(object);
+          object = this.available.pop()!; // Get the object we just released
+        }
       } else {
         // Fallback: create new object (should not happen)
         object = this.createFn();

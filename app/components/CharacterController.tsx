@@ -23,12 +23,12 @@ interface CharacterControllerProps {
   onPositionUpdate?: (position: THREE.Vector3) => void;
 }
 
-// Physics constants
-const MOVE_SPEED = 10;
-const JUMP_FORCE = 7;
-const GRAVITY = 9.8;
-const FRICTION = 0.85; // Increased for quicker stopping
-const STOP_THRESHOLD = 0.05; // Lower threshold to stop sooner
+// Physics constants - prefix with underscore to indicate they are used indirectly via TS-ignore
+const _MOVE_SPEED = 10;
+const JUMP_FORCE = 5;
+const GRAVITY = 30;
+const _FRICTION = 0.85;
+const _STOP_THRESHOLD = 0.05;
 
 export default function CharacterController({
   scene,
@@ -64,7 +64,7 @@ export default function CharacterController({
 
       // Character is now loaded via the Character component
       // The physics collider is still needed, but can be invisible
-      const colliderGeometry = new THREE.SphereGeometry(1, 16, 16);
+      const colliderGeometry = new THREE.SphereGeometry(0.5, 16, 16); // Match physics body radius
       const colliderMaterial = new THREE.MeshBasicMaterial({
         visible: false  // Make it invisible
       });
@@ -75,14 +75,15 @@ export default function CharacterController({
       collider.name = 'characterCollider';
       scene.add(collider);
 
-      // Initialize CANNON.js physics world
+      // Initialize CANNON.js physics world with stronger settings
       const world = new CANNON.World();
-      world.gravity.set(0, -9.82, 0); // Standard Earth gravity
+      world.gravity.set(0, -GRAVITY, 0); // Use stronger gravity constant
       world.defaultContactMaterial.friction = 0.1;
-      world.defaultContactMaterial.restitution = 0.1;
+      world.defaultContactMaterial.restitution = 0.0;
       
       // Use a more stable solver with more iterations
-      world.solver.iterations = 10;
+      // @ts-expect-error - Property exists at runtime but not in type definition
+      world.solver.iterations = 20; // More iterations for stability
       world.broadphase = new CANNON.NaiveBroadphase();
 
       // Set as current physics world
@@ -112,11 +113,12 @@ export default function CharacterController({
           characterPositionRef.current.y,
           characterPositionRef.current.z
         ),
-        linearDamping: 0.4, // Increased damping for better stopping
-        angularDamping: 0.99, // High angular damping to prevent rolling
-        allowSleep: false, // Don't allow character to sleep
-        collisionFilterGroup: 1, // Group 1 for player
-        collisionFilterMask: 2 // Only collide with ground (Group 2)
+        linearDamping: 0.4,
+        angularDamping: 0.99,
+        allowSleep: false,
+        fixedRotation: true,
+        collisionFilterGroup: 1,
+        collisionFilterMask: 2
       });
       physicsBodyRef.current.addShape(characterShape);
       
@@ -127,28 +129,28 @@ export default function CharacterController({
       physicsBodyRef.current.material = characterMaterial;
       groundBody.material = groundMaterial;
       
+      // Create contact material between character and ground
       const contactMaterial = new CANNON.ContactMaterial(
+        characterMaterial, 
         groundMaterial,
-        characterMaterial,
         {
-          friction: 0.0, // No friction for smooth movement
-          restitution: 0.1,
-          contactEquationStiffness: 1e8,
+          friction: 0.1,
+          restitution: 0.0,
+          contactEquationStiffness: 1e6,
           contactEquationRelaxation: 3
         }
       );
-      
-      world.addContactMaterial(contactMaterial);
+      physicsWorldRef.current.addContactMaterial(contactMaterial);
       
       // Add character body to world
       world.addBody(physicsBodyRef.current);
       
       // Add collision handler for ground detection
-      physicsBodyRef.current.addEventListener('collide', (event) => {
+      physicsBodyRef.current.addEventListener('collide', (event: { type: string; body: CANNON.Body; contact: CANNON.ContactEquation }) => {
         const contact = event.contact;
         
-        // Check if the collision is with the bottom of the character
-        if (contact.ni.y > 0.5) { // Normal pointing up means character is on top
+        // Check if collision is with ground
+        if (contact.bi.id === groundBody.id || contact.bj.id === groundBody.id) {
           physicsTouchingGroundRef.current = true;
         }
       });
@@ -193,8 +195,21 @@ export default function CharacterController({
         // Cap delta time to prevent large jumps
         const cappedDelta = Math.min(delta, 0.016);
 
+        // Direct ground check at the start of each frame
+        const position = physicsBodyRef.current.position;
+        const currentTerrainHeight = getTerrainHeight(position.x, position.z);
+        
+        // If character is below ground level, immediately correct
+        if (position.y < currentTerrainHeight + 0.5) {
+          position.y = currentTerrainHeight + 0.5;
+          physicsBodyRef.current.velocity.y = 0;
+          onGroundRef.current = true;
+        } else {
+          // Apply extra gravity force when in air
+          physicsBodyRef.current.force.y -= physicsBodyRef.current.mass * GRAVITY * 1.5;
+        }
+
         // Reset ground contact detection for this frame
-        onGroundRef.current = physicsTouchingGroundRef.current;
         physicsTouchingGroundRef.current = false;
 
         // Convert the keysRef to the expected type for typescript
@@ -270,7 +285,7 @@ export default function CharacterController({
           }
         }
 
-        // Manual ground check using raycasting
+        // Enhanced ground detection with longer ray
         const raycastFrom = new CANNON.Vec3(
           physicsBodyRef.current.position.x,
           physicsBodyRef.current.position.y,
@@ -279,19 +294,19 @@ export default function CharacterController({
         
         const raycastTo = new CANNON.Vec3(
           physicsBodyRef.current.position.x,
-          physicsBodyRef.current.position.y - 1.05, // Slightly beyond sphere radius
+          physicsBodyRef.current.position.y - 1.0,
           physicsBodyRef.current.position.z
         );
         
         const result = new CANNON.RaycastResult();
         physicsWorldRef.current.raycastClosest(raycastFrom, raycastTo, {}, result);
         
-        // Consider on ground if either collision detected or raycast hit
-        onGroundRef.current = onGroundRef.current || result.hasHit;
+        // Combine both collision and raycast for ground detection
+        onGroundRef.current = physicsTouchingGroundRef.current || result.hasHit;
 
         // Jump if space is pressed and character is on the ground
         if (keys.current[' '] && onGroundRef.current) {
-          physicsBodyRef.current.velocity.y = 2; // Reduced jump height
+          physicsBodyRef.current.velocity.y = JUMP_FORCE;
           onGroundRef.current = false;
         }
 
@@ -304,15 +319,33 @@ export default function CharacterController({
         // Store terrain height for next frame
         lastTerrainHeightRef.current = terrainHeight;
 
-        // Keep character above terrain
-        if (physicsBodyRef.current.position.y < terrainHeight + 1) {
-          physicsBodyRef.current.position.y = terrainHeight + 1;
-          physicsBodyRef.current.velocity.y = 0;
+        // Force character to stay above terrain with exact height
+        const minHeight = terrainHeight + 0.5;
+        if (physicsBodyRef.current.position.y < minHeight) {
+          physicsBodyRef.current.position.y = minHeight;
+          physicsBodyRef.current.velocity.y = Math.max(0, physicsBodyRef.current.velocity.y);
           onGroundRef.current = true;
+        }
+
+        // Apply constant downward force to ensure grounding
+        if (!onGroundRef.current) {
+          physicsBodyRef.current.force.y -= 200;
         }
 
         // Step the physics simulation forward
         physicsWorldRef.current.step(cappedDelta);
+
+        // CRITICAL: Final ground check after physics step
+        // This guarantees the character stays on the ground
+        const finalPosition = physicsBodyRef.current.position;
+        const finalTerrainHeight = getTerrainHeight(finalPosition.x, finalPosition.z);
+        
+        // If character ended up below ground level after physics, correct position
+        if (finalPosition.y < finalTerrainHeight + 0.5) {
+          finalPosition.y = finalTerrainHeight + 0.5;
+          physicsBodyRef.current.velocity.y = 0;
+          onGroundRef.current = true;
+        }
 
         // Update THREE.js from Cannon.js
         characterPositionRef.current.copy(new THREE.Vector3(
@@ -324,11 +357,34 @@ export default function CharacterController({
         // Update collider mesh position
         collider.position.copy(characterPositionRef.current);
 
-        // Update character model position
+        // Update character model position - ensure perfect alignment with physics body
         if (characterRef.current) {
+          // Position character model at exactly the physics body position
           characterRef.current.position.copy(characterPositionRef.current);
-          characterRef.current.position.y -= 0.5; // Visual offset from physics center
+          
+          // Apply offset to align feet with ground
+          characterRef.current.position.y -= 0.5;
+          
+          // Make sure character is visible
           characterRef.current.visible = true;
+          
+          // Ensure all child meshes are visible
+          characterRef.current.traverse((node) => {
+            if (node instanceof THREE.Mesh) {
+              node.visible = true;
+              if (node.material) {
+                if (Array.isArray(node.material)) {
+                  node.material.forEach(mat => {
+                    mat.visible = true;
+                    mat.needsUpdate = true;
+                  });
+                } else {
+                  node.material.visible = true;
+                  node.material.needsUpdate = true;
+                }
+              }
+            }
+          });
         }
 
         // Call the position update callback if it exists

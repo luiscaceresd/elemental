@@ -14,6 +14,13 @@ type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string
 };
 
+// Add a type for the global window object with our custom properties
+interface CustomWindow extends Window {
+  characterPosition?: THREE.Vector3;
+  updateWaterParticlesPlayerPos?: (position: THREE.Vector3) => void;
+  getTerrainHeight?: (x: number, z: number) => number;
+}
+
 export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paused' }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [sceneReady, setSceneReady] = useState(false);
@@ -42,7 +49,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     d: false,
     ' ': false
   });
-  const characterPositionRef = useRef<THREE.Vector3 | null>(null);
+  const characterPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 1, 5));
   const updateFunctionsRef = useRef<IdentifiableFunction[]>([]);
 
   // New refs for waterbending
@@ -192,9 +199,6 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       // Add fog for atmospheric depth
       scene.fog = new THREE.Fog(0x87CEFA, 70, 300); // Increased distance for better visibility
 
-      // Initialize character position reference
-      characterPositionRef.current = new THREE.Vector3(0, 1, 5);
-
       // Handle keyboard inputs for PC controls
       const onKeyDown = (event: KeyboardEvent) => {
         // Convert key to lowercase to handle both cases
@@ -284,14 +288,12 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       
       // Expose character position to the water particles system
       if (typeof window !== 'undefined') {
-        // @ts-expect-error - Exposed for WaterParticles component
-        window.characterPosition = characterPositionRef.current;
+        const customWindow = window as CustomWindow;
+        customWindow.characterPosition = characterPositionRef.current;
         
         // Also update water particles system if the API is available
-        // @ts-expect-error - Use the API provided by WaterParticles
-        if (window.updateWaterParticlesPlayerPos) {
-          // @ts-expect-error - Call the function
-          window.updateWaterParticlesPlayerPos(characterPositionRef.current);
+        if (customWindow.updateWaterParticlesPlayerPos) {
+          customWindow.updateWaterParticlesPlayerPos(characterPositionRef.current);
         }
       }
     }

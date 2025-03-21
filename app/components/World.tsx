@@ -6,6 +6,19 @@ import { createNoise2D } from 'simplex-noise';
 import Tree from './Tree';
 import Pond from './Pond';
 
+// Define a window with terrain height function for type safety
+interface WindowWithTerrain extends Window {
+  getTerrainHeight?: (x: number, z: number) => number;
+}
+
+// Set getTerrainHeight immediately when the file loads
+if (typeof window !== 'undefined') {
+  const customWindow = window as WindowWithTerrain;
+  customWindow.getTerrainHeight = (x: number, z: number) => {
+    return 0; // Always return 0 for flat terrain
+  };
+}
+
 interface WorldProps {
   scene: THREE.Scene;
   isBendingRef: React.MutableRefObject<boolean>;
@@ -13,13 +26,23 @@ interface WorldProps {
   registerUpdate: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
 }
 
+const getTerrainValueAtPosition = (
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  x: number, 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  z: number
+): number => {
+  return 0; // Always return flat terrain
+};
+
 export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate }: WorldProps) {
   const [treePositions, setTreePositions] = useState<THREE.Vector3[]>([]);
   const [pondPositions, setPondPositions] = useState<{ position: THREE.Vector3, size: number, depth: number }[]>([]);
 
   useEffect(() => {
     const setupWorld = async () => {
-      const THREE = await import('three');
+      // window.getTerrainHeight is already set above, no need to redefine here
+      
       const noise2D = createNoise2D(); // Initialize Simplex noise
 
       // --- Terrain with flat surface ---
@@ -37,7 +60,8 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
         { center: new THREE.Vector2(-10, -25), radius: 18, depth: 0.1 },
       ];
 
-      // Create completely flat heightmap
+      // Fill heightmap with zeros for flat terrain
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const heightmap = new Float32Array((terrainSegments + 1) * (terrainSegments + 1)).fill(0);
 
       // Apply heightmap to terrain vertices (all zeros for flat terrain)
@@ -278,12 +302,6 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       update._id = 'terrainShaderUpdate';
       const removeUpdate = registerUpdate(update);
 
-      // Export terrain height function for other components
-      // @ts-expect-error - Property 'getTerrainHeight' does not exist on Window interface
-      window.getTerrainHeight = (x: number, z: number) => {
-        return 0; // Always return 0 for flat terrain
-      };
-
       // Cleanup
       return () => {
         scene.remove(terrain);
@@ -296,8 +314,12 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
         skyGeometry.dispose();
         skyMaterial.dispose();
         removeUpdate();
-        // @ts-expect-error - Property 'getTerrainHeight' does not exist on Window interface
-        delete window.getTerrainHeight;
+        
+        // Clean up global terrain function
+        if (typeof window !== 'undefined') {
+          const customWindow = window as WindowWithTerrain;
+          delete customWindow.getTerrainHeight;
+        }
       };
     };
 

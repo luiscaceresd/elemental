@@ -24,6 +24,7 @@ export function initWaterPhysics(): CANNON.World {
     physicsWorld.gravity.set(0, GRAVITY, 0);
     
     // Configure solver iterations
+    // @ts-expect-error - Property exists at runtime but not in type definition
     physicsWorld.solver.iterations = 10;
     
     // Set up collision detection
