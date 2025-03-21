@@ -8,6 +8,19 @@ import { activateRandomParticles, deactivateDistantParticles } from '../utils/wa
 import { WaterDrop, WaterParticlesProps, CustomWindow } from './water/WaterParticleTypes';
 import { WaterParticleManager } from './water/WaterParticleManager';
 
+// Extend the window interface to include waterBendingSystem
+declare global {
+  interface Window {
+    waterBendingSystem?: {
+      getWaterAmount: () => number;
+      setWaterAmount: (amount: number) => void;
+      createWaterDrop: (position: THREE.Vector3, velocity: THREE.Vector3) => void;
+    };
+    pondPositions?: Array<{position: THREE.Vector3, size: number}>;
+    updateWaterParticlesPlayerPos?: (position: THREE.Vector3) => void;
+  }
+}
+
 export default function WaterParticles({ 
   scene, 
   isBendingRef, 
@@ -21,7 +34,7 @@ export default function WaterParticles({
   const particlesContainerRef = useRef<THREE.Group | null>(null);
   const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
   const activeCountRef = useRef<number>(0);
-  const particleManagerRef = useRef<WaterParticleManager>(new WaterParticleManager());
+  const particleManagerRef = useRef<WaterParticleManager>(WaterParticleManager.getInstance());
   
   // Camera position update - to activate particles near the player
   const updatePlayerPosition = useCallback((position: THREE.Vector3) => {
@@ -32,26 +45,9 @@ export default function WaterParticles({
   useEffect(() => {
     if (!scene) return;
 
-    // Create a physics world with reduced step
-    const world = new CANNON.World({
-      gravity: new CANNON.Vec3(0, -9.82, 0) // Standard Earth gravity
-    });
-    
-    // Optimize physics world
-    world.broadphase = new CANNON.NaiveBroadphase();
-    world.allowSleep = true; // Allow bodies to sleep when inactive
-
-    // Add a ground plane
-    const groundShape = new CANNON.Plane();
-    const groundBody = new CANNON.Body({
-      mass: 0, // Static body
-      shape: groundShape,
-      collisionFilterGroup: 2, // Group 2 for ground
-      collisionFilterMask: 1 | 4  // Collide with player (Group 1) and drops (Group 4)
-    });
-    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Make it horizontal
-    world.addBody(groundBody);
-    
+    // Get singleton instance of particle manager and initialize physics world
+    const manager = WaterParticleManager.getInstance();
+    const world = manager.initPhysicsWorld();
     physicsWorldRef.current = world;
 
     // Create container for particles
@@ -61,8 +57,8 @@ export default function WaterParticles({
 
     // Create water drops pool
     const drops: WaterDrop[] = [];
-    const totalPoolSize = 2000; // Total pool size remains the same
-    const maxActiveParticles = 300; // But we'll only activate a subset
+    const totalPoolSize = 500; // Reduced from 2000 to 500
+    const maxActiveParticles = 50; // Reduced from 300 to 50
     
     // Create reusable geometries and materials
     const dropGeometry = new THREE.SphereGeometry(0.5, 8, 8); // Reduced segments
@@ -129,14 +125,10 @@ export default function WaterParticles({
     dropsRef.current = drops;
     setIsLoaded(true);
 
-    // Try to activate initial particles
-    activateRandomParticles(
-      drops, 
-      maxActiveParticles, 
-      playerPositionRef.current, 
-      activeCountRef.current,
-      (newCount) => { activeCountRef.current = newCount; }
-    );
+    // Expose ponds array to window for water particle generation from ponds
+    if (typeof window !== 'undefined' && !(window as any).pondPositions) {
+      (window as any).pondPositions = [];
+    }
 
     // Update the camera position in our system when the player moves
     if (typeof window !== 'undefined') {
@@ -157,93 +149,94 @@ export default function WaterParticles({
     };
   }, [scene, updatePlayerPosition]);
 
-  // Update function for the animation loop - now optimized
-  const updateParticles = useCallback((delta: number) => {
-    if (!isLoaded || delta > 0.1) return; // Skip large deltas
-    
-    const world = physicsWorldRef.current;
-    if (!world) return;
-    
-    const drops = dropsRef.current;
-    const maxActiveParticles = 300;
-    const maxDistance = 300; // Maximum distance before deactivation
-    
-    // Step the physics world
-    world.step(delta);
-    
-    // Manage particle pool: deactivate distant particles
-    deactivateDistantParticles(
-      drops, 
-      maxDistance, 
-      playerPositionRef.current,
-      () => { activeCountRef.current--; }
-    );
-    
-    // Activate new particles if needed
-    if (activeCountRef.current < maxActiveParticles) {
-      activateRandomParticles(
-        drops, 
-        maxActiveParticles, 
-        playerPositionRef.current, 
-        activeCountRef.current,
-        (newCount) => { activeCountRef.current = newCount; }
-      );
-    }
-    
-    // Process water bending effects
-    if (isBendingRef.current && crosshairPositionRef.current) {
-      processBendingEffects(drops);
-    }
-    
-    // Update mesh positions from physics bodies
-    updateMeshPositions(drops);
-    
-    // Process particle merging
-    particleManagerRef.current.processMergingParticles(drops, activeCountRef);
-    
-    // Update shader uniforms
-    particleManagerRef.current.updateShaderUniforms(drops);
-  }, [isLoaded, isBendingRef, crosshairPositionRef]);
-
-  // Process water bending effects on particles
+  // Process water bending - attract drops to crosshair
   const processBendingEffects = useCallback((drops: WaterDrop[]) => {
     if (!isBendingRef.current || !crosshairPositionRef.current) return;
     
     const crosshairPos = crosshairPositionRef.current;
+    const attractionDistance = 50; // Large attraction range
+    const attractionStrength = 400; // Even stronger pull
+    const collectionDistance = 8.0; // Increased collection distance
+    let collectedCount = 0;
     
-    for (let i = 0; i < drops.length; i++) {
-      const drop = drops[i];
+    for (const drop of drops) {
       if (!drop.active || !drop.visible) continue;
       
-      const dropBody = drop.physicsBody;
-      const dropPos = new THREE.Vector3(
-        dropBody.position.x,
-        dropBody.position.y,
-        dropBody.position.z
-      );
+      const dropPos = drop.physicsBody.position;
+      const dx = crosshairPos.x - dropPos.x;
+      const dy = crosshairPos.y - dropPos.y;
+      const dz = crosshairPos.z - dropPos.z;
       
-      const direction = crosshairPos.clone().sub(dropPos);
-      const distance = direction.length();
+      const distanceSquared = dx*dx + dy*dy + dz*dz;
       
-      if (distance < 30) { // Attraction range
-        direction.normalize();
-        const pullStrength = 25 * (1 - distance / 30); // Strong pull
+      // Collection first - check if drop is very close to crosshair
+      if (distanceSquared < collectionDistance * collectionDistance) {
+        // Deactivate the collected particle
+        drop.active = false;
+        drop.visible = false;
+        drop.mesh.visible = false;
+        drop.physicsBody.position.y = -1000;
+        drop.physicsBody.sleep();
+        activeCountRef.current--;
+        collectedCount++;
+        continue;
+      }
+      
+      // Apply attraction force for particles within range
+      if (distanceSquared < attractionDistance * attractionDistance) {
+        const distance = Math.sqrt(distanceSquared);
         
-        // Apply force using CANNON.js
-        dropBody.applyForce(
-          new CANNON.Vec3(
-            direction.x * pullStrength * dropBody.mass,
-            direction.y * pullStrength * dropBody.mass,
-            direction.z * pullStrength * dropBody.mass
-          ),
-          dropBody.position // Simplified - use body position directly
+        // Create directional unit vector
+        const direction = new CANNON.Vec3(
+          dx / distance,
+          dy / distance,
+          dz / distance
         );
         
-        // Wake up body if it was sleeping
-        dropBody.wakeUp();
+        // Force is stronger when closer (quadratic relationship for stronger close pull)
+        const distanceRatio = distance / attractionDistance;
+        const forceMagnitude = attractionStrength * Math.pow(1 - distanceRatio, 2) * drop.physicsBody.mass;
+        
+        // Apply force in the direction of the crosshair
+        const force = new CANNON.Vec3(
+          direction.x * forceMagnitude,
+          direction.y * forceMagnitude,
+          direction.z * forceMagnitude
+        );
+        
+        drop.physicsBody.applyForce(force, drop.physicsBody.position);
+        
+        // Reduce damping when close to allow particles to reach collection point
+        if (distance < attractionDistance * 0.4) {
+          // Reduce linear damping temporarily
+          const originalDamping = drop.physicsBody.linearDamping;
+          drop.physicsBody.linearDamping = 0.05; // Almost no damping
+          
+          // Also add a significant velocity boost toward crosshair
+          drop.physicsBody.velocity.x += direction.x * 10;
+          drop.physicsBody.velocity.y += direction.y * 10;
+          drop.physicsBody.velocity.z += direction.z * 10;
+          
+          // Restore damping next frame
+          setTimeout(() => {
+            if (drop.physicsBody) {
+              drop.physicsBody.linearDamping = originalDamping;
+            }
+          }, 100);
+        }
+        
+        drop.physicsBody.wakeUp();
       }
     }
-  }, [isBendingRef, crosshairPositionRef]);
+    
+    // Add collected water to player's water amount
+    if (collectedCount > 0 && window.waterBendingSystem?.getWaterAmount) {
+      const currentAmount = window.waterBendingSystem.getWaterAmount();
+      const newAmount = currentAmount + collectedCount;
+      window.waterBendingSystem.setWaterAmount(newAmount);
+      console.log(`Collected ${collectedCount} water drops! New water: ${newAmount}`);
+    }
+  }, [isBendingRef, crosshairPositionRef, activeCountRef]);
 
   // Update mesh positions from physics bodies
   const updateMeshPositions = useCallback((drops: WaterDrop[]) => {
@@ -292,7 +285,93 @@ export default function WaterParticles({
         dropBody.wakeUp();
       }
     }
-  }, []);
+  }, [playerPositionRef]);
+
+  // Update function for the animation loop - now optimized
+  const updateParticles = useCallback((delta: number) => {
+    if (!isLoaded || delta > 0.1) return; // Skip large deltas
+    
+    const world = physicsWorldRef.current;
+    const manager = particleManagerRef.current;
+    if (!world) return;
+    
+    const drops = dropsRef.current;
+    const maxActiveParticles = 300;
+    const maxDistance = 300; // Maximum distance before deactivation
+    
+    // Step the physics world
+    world.step(delta);
+    
+    // Manage particle pool: deactivate distant particles
+    deactivateDistantParticles(
+      drops, 
+      maxDistance, 
+      playerPositionRef.current,
+      () => { activeCountRef.current--; }
+    );
+    
+    // Check for ponds to activate particles from
+    const ponds = (window as any).pondPositions || [];
+    if (ponds.length > 0 && activeCountRef.current < maxActiveParticles) {
+      // Find the closest pond to the player
+      let closestPond = null;
+      let closestDistance = Infinity;
+      
+      for (const pond of ponds) {
+        const distance = playerPositionRef.current.distanceTo(pond.position);
+        if (distance < 50 && distance < closestDistance) {
+          closestPond = pond;
+          closestDistance = distance;
+        }
+      }
+      
+      // Activate particles from the closest pond
+      if (closestPond) {
+        const particlesToActivate = Math.floor(Math.min(maxActiveParticles - activeCountRef.current, 50));
+        if (particlesToActivate > 0) {
+          manager.activateParticlesInArea(
+            drops,
+            closestPond.position,
+            closestPond.size / 2,
+            particlesToActivate,
+            activeCountRef
+          );
+        }
+      }
+    } else if (activeCountRef.current < maxActiveParticles) {
+      // If no ponds are nearby, fall back to random particle activation
+      activateRandomParticles(
+        drops, 
+        maxActiveParticles, 
+        playerPositionRef.current, 
+        activeCountRef.current,
+        (newCount) => { activeCountRef.current = newCount; }
+      );
+    }
+    
+    // Process water bending effects - apply attraction and collect particles
+    if (isBendingRef.current && crosshairPositionRef.current) {
+      processBendingEffects(drops);
+    }
+    
+    // Update mesh positions from physics bodies
+    updateMeshPositions(drops);
+    
+    // Process particle merging
+    manager.processMergingParticles(drops, activeCountRef, isBendingRef.current);
+    
+    // Update shader uniforms
+    manager.updateShaderUniforms(drops);
+  }, [
+    isLoaded,
+    isBendingRef,
+    crosshairPositionRef,
+    processBendingEffects,
+    deactivateDistantParticles,
+    activateRandomParticles,
+    playerPositionRef,
+    updateMeshPositions
+  ]);
 
   // Register update function with the animation loop
   useEffect(() => {

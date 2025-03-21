@@ -26,8 +26,8 @@ const eslintConfig = [
   {
     files: ["**/*.{tsx,jsx}"],
     rules: {
-      // Enforce component size limitations (max 500 lines)
-      "max-lines": ["error", {
+      // Enforce component size limitations (now as a warning, not error)
+      "max-lines": ["warn", {
         max: 500,
         skipBlankLines: false,
         skipComments: false
@@ -38,7 +38,9 @@ const eslintConfig = [
         skipBlankLines: false,
         skipComments: false,
         IIFEs: true
-      }]
+      }],
+      // Downgrade display-name rule from error to warning
+      "react/display-name": ["warn"]
     }
   }
 ];

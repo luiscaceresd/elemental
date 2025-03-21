@@ -1,8 +1,8 @@
 'use client';
 
-import { useRef } from 'react';
+import { useEffect, useRef, forwardRef } from 'react';
 import * as THREE from 'three';
-import { WaterBendingMain } from './water/WaterBendingMain';
+import { WaterBendingMain, WaterBendingHandle } from './water/WaterBendingMain';
 
 interface WaterBendingProps {
   scene: THREE.Scene;
@@ -19,30 +19,46 @@ interface WaterBendingProps {
  * This acts as a wrapper for the refactored WaterBendingMain component
  * which contains the core water bending functionality
  */
-export function WaterBending({
-  scene,
+export const WaterBending = forwardRef<WaterBendingHandle, WaterBendingProps>(({ 
+  scene, 
+  domElement, 
+  registerUpdate, 
   camera,
-  domElement,
-  registerUpdate,
-  characterPositionRef,
   isBendingRef,
-  crosshairPositionRef
-}: WaterBendingProps) {
-  // Environment objects (would be populated in a real implementation)
-  const environmentObjects = useRef<THREE.Object3D[]>([]);
+  crosshairPositionRef,
+  characterPositionRef
+}, ref) => {
+  // Create a local ref for imperative calls if ref is not provided
+  const localRef = useRef<WaterBendingHandle | null>(null);
+  
+  // Use the forwarded ref if provided, otherwise use local ref
+  const actualRef = ref || localRef;
+
+  useEffect(() => {
+    // Expose water bending functionality to the window for other components
+    const waterBendingMainRef = (actualRef as React.RefObject<WaterBendingHandle>).current;
+    if (waterBendingMainRef && waterBendingMainRef.collectionSystem) {
+      (window as any).waterBendingSystem = {
+        createWaterDrop: waterBendingMainRef.collectionSystem.createWaterDrop
+      };
+    }
+    
+    return () => {
+      (window as any).waterBendingSystem = undefined;
+    };
+  }, [actualRef]);
 
   // Render the water bending functionality
   return (
-    <WaterBendingMain
+    <WaterBendingMain 
       camera={camera}
-      characterPositionRef={characterPositionRef}
+      scene={scene}
+      domElement={domElement}
+      registerUpdate={registerUpdate}
       isBendingRef={isBendingRef}
       crosshairPositionRef={crosshairPositionRef}
-      scene={scene}
-      environmentObjects={environmentObjects.current}
-      registerUpdate={registerUpdate}
-      domElement={domElement}
-      debug={true}
+      characterPositionRef={characterPositionRef}
+      ref={actualRef}
     />
   );
-}
+});

@@ -6,12 +6,103 @@ import { WaterDrop } from './WaterParticleTypes';
  * Class that handles the merging logic for water particles
  */
 export class WaterParticleManager {
+  private static instance: WaterParticleManager;
+  private physicsWorld: CANNON.World | null = null;
+
+  /**
+   * Get the singleton instance
+   */
+  public static getInstance(): WaterParticleManager {
+    if (!WaterParticleManager.instance) {
+      WaterParticleManager.instance = new WaterParticleManager();
+    }
+    return WaterParticleManager.instance;
+  }
+
+  /**
+   * Initialize physics world for water particles
+   */
+  public initPhysicsWorld(): CANNON.World {
+    if (this.physicsWorld) return this.physicsWorld;
+
+    // Create a physics world with reduced step
+    const world = new CANNON.World({
+      gravity: new CANNON.Vec3(0, -9.82, 0) // Standard Earth gravity
+    });
+    
+    // Optimize physics world
+    world.broadphase = new CANNON.NaiveBroadphase();
+    world.allowSleep = true; // Allow bodies to sleep when inactive
+
+    // Add a ground plane
+    const groundShape = new CANNON.Plane();
+    const groundBody = new CANNON.Body({
+      mass: 0, // Static body
+      shape: groundShape,
+      collisionFilterGroup: 2, // Group 2 for ground
+      collisionFilterMask: 1 | 4  // Collide with player (Group 1) and drops (Group 4)
+    });
+    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Make it horizontal
+    world.addBody(groundBody);
+    
+    this.physicsWorld = world;
+    return world;
+  }
+
+  /**
+   * Activate particles in a specific area (e.g., pond)
+   */
+  public activateParticlesInArea(
+    drops: WaterDrop[],
+    center: THREE.Vector3,
+    radius: number,
+    count: number,
+    activeCountRef: { current: number }
+  ): number {
+    // Find inactive drops to activate
+    const inactiveDrops = drops.filter(drop => !drop.active);
+    const toActivate = Math.min(count, inactiveDrops.length);
+    let activated = 0;
+
+    for (let i = 0; i < toActivate; i++) {
+      const drop = inactiveDrops[i];
+      
+      // Random position within the circle
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * radius;
+      const x = center.x + Math.cos(angle) * distance;
+      const z = center.z + Math.sin(angle) * distance;
+      const y = center.y + 0.5; // Slightly above ground
+      
+      // Position the drop
+      drop.physicsBody.position.set(x, y, z);
+      drop.physicsBody.velocity.set(
+        (Math.random() - 0.5) * 1,
+        Math.random() * 1,
+        (Math.random() - 0.5) * 1
+      );
+      
+      // Activate the drop
+      drop.active = true;
+      drop.visible = true;
+      drop.mesh.visible = true;
+      drop.lastActive = performance.now();
+      drop.physicsBody.wakeUp();
+      
+      activated++;
+      activeCountRef.current++;
+    }
+    
+    return activated;
+  }
+
   /**
    * Process merging of water particles that are close to each other
    */
   public processMergingParticles(
     drops: WaterDrop[],
-    activeCountRef: { current: number }
+    activeCountRef: { current: number },
+    isBending: boolean = false
   ): void {
     // Process merging less frequently (every other frame)
     if (Math.floor(performance.now() / 100) % 2 !== 0) {
@@ -20,6 +111,9 @@ export class WaterParticleManager {
 
     // Track merged particles in this frame
     const mergedThisFrame = new Set<number>();
+
+    // Modified merge radius factor if bending water
+    const mergeRadiusFactor = isBending ? 0.5 : 0.25;
 
     // Check for merging using physics positions - only for active particles
     for (let i = 0; i < drops.length; i++) {
@@ -39,7 +133,7 @@ export class WaterParticleManager {
         // Fast distance check (avoiding square root)
         const distanceSq = dx*dx + dy*dy + dz*dz;
         const combinedRadius = drops[i].scale.x + drops[j].scale.x;
-        const radiusSq = combinedRadius * combinedRadius * 0.25; // * 0.5^2
+        const radiusSq = combinedRadius * combinedRadius * mergeRadiusFactor;
         
         // If drops are close enough, merge them
         if (distanceSq < radiusSq) {
@@ -224,6 +318,38 @@ export class WaterParticleManager {
         if (dropMaterial.uniforms && dropMaterial.uniforms.time) {
           dropMaterial.uniforms.time.value = currentTime;
         }
+      }
+    }
+  }
+
+  /**
+   * Create method to add to the window interface for creating particles at specific locations
+   * This is used by projectiles when they impact surfaces
+   */
+  public createParticlesAtLocation(
+    position: THREE.Vector3,
+    radius: number,
+    count: number
+  ): void {
+    if (typeof window !== 'undefined' && window.waterBendingSystem?.createWaterDrop) {
+      for (let i = 0; i < count; i++) {
+        // Random position within specified radius
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * radius;
+        const x = position.x + Math.cos(angle) * distance;
+        const z = position.z + Math.sin(angle) * distance;
+        const y = position.y + 0.5 + Math.random() * 0.5;
+        
+        // Create position and velocity vectors
+        const particlePos = new THREE.Vector3(x, y, z);
+        const velocity = new THREE.Vector3(
+          (Math.random() - 0.5) * 3,
+          2 + Math.random() * 3, // Upward velocity for fountain effect
+          (Math.random() - 0.5) * 3
+        );
+        
+        // Create water drop
+        window.waterBendingSystem.createWaterDrop(particlePos, velocity);
       }
     }
   }

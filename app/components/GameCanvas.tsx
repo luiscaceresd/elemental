@@ -8,6 +8,7 @@ import { WaterBending } from './WaterBending';
 import MobileControls from './MobileControls';
 import World from './World';
 import Crosshair from './Crosshair';
+import Pond from './Pond';
 
 // Add a type for functions with an identifier
 type IdentifiableFunction = ((delta: number) => void) & {
@@ -55,6 +56,21 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
   // New refs for waterbending
   const isBendingRef = useRef<boolean>(false);
   const crosshairPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  const waterBendingRef = useRef<any>(null);
+  
+  // Define pond locations for the game
+  const ponds = [
+    {
+      position: new THREE.Vector3(-40, 0, -60),
+      size: 15,
+      depth: 2
+    },
+    {
+      position: new THREE.Vector3(30, 0, 20),
+      size: 10,
+      depth: 1.5
+    }
+  ];
 
   // Add function to update crosshair position using raycasting
   const updateCrosshairPosition = useCallback((event: MouseEvent) => {
@@ -368,6 +384,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             isBendingRef={isBendingRef}
             crosshairPositionRef={crosshairPositionRef}
             characterPositionRef={characterPositionRef}
+            ref={waterBendingRef}
           />
 
           {/* Show mobile controls only on mobile devices when game is playing */}
@@ -378,6 +395,21 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
               onJump={handleJump}
             />
           )}
+
+          {/* Add Pond components */}
+          {ponds.map((pond, index) => (
+            <Pond
+              key={`pond-${index}`}
+              position={pond.position}
+              size={pond.size || 10}
+              depth={pond.depth || 2}
+              scene={sceneRef.current}
+              isBendingRef={isBendingRef}
+              crosshairPositionRef={crosshairPositionRef}
+              registerUpdate={registerUpdate}
+              createWaterDrop={(window as any).waterBendingSystem?.createWaterDrop}
+            />
+          ))}
         </>
       )}
     </div>

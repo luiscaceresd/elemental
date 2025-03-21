@@ -29,4 +29,12 @@ export interface WaterParticlesProps {
 export interface CustomWindow extends Window {
   updateWaterParticlesPlayerPos?: (position: THREE.Vector3) => void;
   characterPosition?: THREE.Vector3;
+  isWaterBending?: boolean;
+  crosshairPosition?: THREE.Vector3;
+  pondPositions?: {position: THREE.Vector3, size: number}[];
+  waterBendingSystem?: {
+    getWaterAmount: () => number;
+    setWaterAmount: (amount: number) => void;
+    createWaterDrop: (position: THREE.Vector3, velocity: THREE.Vector3) => void;
+  };
 } 

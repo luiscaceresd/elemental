@@ -101,7 +101,10 @@ export function useWaterCollection(
         material: new CANNON.Material({
           friction: 0.1,
           restitution: 0.6
-        })
+        }),
+        // Add proper collision filtering for water drops
+        collisionFilterGroup: 8, // Group 8 for collectible water drops
+        collisionFilterMask: 2   // Only collide with ground (Group 2)
       });
 
       return {
@@ -127,6 +130,11 @@ export function useWaterCollection(
       obj.createdAt = Date.now();
       obj.mesh.visible = true;
       scene.add(obj.mesh);
+      
+      // Add to active drops when activated
+      if (!activeDropsRef.current.includes(obj)) {
+        activeDropsRef.current.push(obj);
+      }
     };
 
     const pool = new ObjectPool<WaterDrop>(
@@ -238,11 +246,17 @@ export function useWaterCollection(
       world.addBody(waterDrop.body);
     }
 
-    // Add to active drops
-    activeDropsRef.current.push(waterDrop);
+    // Ensure it's active and tracked
+    waterDrop.isActive = true;
+    waterDrop.createdAt = Date.now();
 
-    if (debug) {
-      console.log("Created water drop at", position);
+    // Make sure it's not already in the active drops array before adding it
+    if (!activeDropsRef.current.includes(waterDrop)) {
+      activeDropsRef.current.push(waterDrop);
+
+      if (debug) {
+        console.log(`Created water drop at ${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}. Active drops: ${activeDropsRef.current.length}`);
+      }
     }
 
     return waterDrop;
@@ -374,7 +388,16 @@ export function useWaterCollection(
 
     // Update water amount if collected any
     if (collected > 0) {
-      setWaterAmount(prev => Math.min(prev + collected, maxWaterCapacity));
+      if (debug) {
+        console.log(`Collected ${collected} water drops, increasing amount from ${waterAmount} to ${Math.min(waterAmount + collected, maxWaterCapacity)}`);
+      }
+      setWaterAmount(prev => {
+        const newAmount = Math.min(prev + collected, maxWaterCapacity);
+        if (debug) {
+          console.log(`Water amount updated to ${newAmount}`);
+        }
+        return newAmount;
+      });
     }
 
     return collected;

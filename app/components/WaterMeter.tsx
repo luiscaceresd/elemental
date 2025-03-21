@@ -4,11 +4,10 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 
 interface WaterMeterProps {
-  currentWater: number;
-  maxWater: number;
   requiredWater: number;
   chargeLevel?: number;
   isCharging?: boolean;
+  // Remove currentWater and maxWater as we'll get these from the global system
 }
 
 /**
@@ -16,14 +15,14 @@ interface WaterMeterProps {
  * It also shows a pulsing effect when there's enough water for an ability
  */
 export default function WaterMeter({ 
-  currentWater, 
-  maxWater,
   requiredWater,
   chargeLevel = 0,
   isCharging = false
 }: WaterMeterProps) {
   const [isMobile, setIsMobile] = useState(false);
   const [showPulse, setShowPulse] = useState(false);
+  const [currentWater, setCurrentWater] = useState(0);
+  const maxWater = 100; // Match MAX_WATER_CAPACITY from WaterBendingMain.tsx
 
   // Detect mobile devices
   useEffect(() => {
@@ -36,6 +35,25 @@ export default function WaterMeter({
     
     return () => {
       window.removeEventListener('resize', checkMobile);
+    };
+  }, []);
+
+  // Connect to the global water system
+  useEffect(() => {
+    const updateWaterAmount = () => {
+      if (window.waterBendingSystem?.getWaterAmount) {
+        setCurrentWater(window.waterBendingSystem.getWaterAmount());
+      }
+    };
+    
+    // Initial update
+    updateWaterAmount();
+    
+    // Set up interval to update water amount regularly
+    const intervalId = setInterval(updateWaterAmount, 100);
+    
+    return () => {
+      clearInterval(intervalId);
     };
   }, []);
 
