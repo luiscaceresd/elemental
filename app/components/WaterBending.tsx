@@ -30,24 +30,19 @@ export function WaterBending({
 }: WaterBendingProps) {
   // Environment objects (would be populated in a real implementation)
   const environmentObjects = useRef<THREE.Object3D[]>([]);
-  
-  // Create a reactive player object that updates with the character position
-  const player = {
-    get position() {
-      return characterPositionRef.current || new THREE.Vector3();
-    },
-    rotation: new THREE.Euler()
-  };
-  
+
   // Render the water bending functionality
   return (
     <WaterBendingMain
       camera={camera}
-      player={player}
+      characterPositionRef={characterPositionRef}
+      isBendingRef={isBendingRef}
+      crosshairPositionRef={crosshairPositionRef}
       scene={scene}
       environmentObjects={environmentObjects.current}
       registerUpdate={registerUpdate}
       domElement={domElement}
+      debug={true}
     />
   );
 }

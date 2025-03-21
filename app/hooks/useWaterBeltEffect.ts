@@ -63,7 +63,7 @@ export function useWaterBeltEffect(
     // Generate random positions on a sphere
     const positions = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
-    const colors = new Float32Array(particleCount * 3);
+    const waterColors = new Float32Array(particleCount * 3);
     
     particlePositions.current = positions;
     
@@ -85,14 +85,14 @@ export function useWaterBeltEffect(
       sizes[i] = particleSize * (0.8 + Math.random() * 0.4);
       
       // Colors with slight variations
-      colors[i * 3] = color.r * (0.9 + Math.random() * 0.2);
-      colors[i * 3 + 1] = color.g * (0.9 + Math.random() * 0.2);
-      colors[i * 3 + 2] = color.b * (0.9 + Math.random() * 0.2);
+      waterColors[i * 3] = color.r * (0.9 + Math.random() * 0.2);
+      waterColors[i * 3 + 1] = color.g * (0.9 + Math.random() * 0.2);
+      waterColors[i * 3 + 2] = color.b * (0.9 + Math.random() * 0.2);
     }
     
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('waterColor', new THREE.BufferAttribute(waterColors, 3));
     
     // Create shader material
     const material = new THREE.ShaderMaterial({
@@ -105,14 +105,14 @@ export function useWaterBeltEffect(
       },
       vertexShader: `
         attribute float size;
-        attribute vec3 color;
+        attribute vec3 waterColor;
         varying vec3 vColor;
         varying float vWaterLevel;
         uniform float time;
         uniform float waterLevel;
         
         void main() {
-          vColor = color;
+          vColor = waterColor;
           vWaterLevel = waterLevel;
           
           // Apply slight wobble effect
@@ -203,14 +203,21 @@ export function useWaterBeltEffect(
     // Update time for animation
     time.current += delta;
     
-    // Update time in shader
+    // Update time and water level in shader directly without using state
     const material = particles.current.material as THREE.ShaderMaterial;
-    if (material.uniforms && material.uniforms.time) {
-      material.uniforms.time.value = time.current;
+    if (material.uniforms) {
+      if (material.uniforms.time) {
+        material.uniforms.time.value = time.current;
+      }
+      if (material.uniforms.waterLevel) {
+        material.uniforms.waterLevel.value = currentWaterLevel;
+      }
     }
     
-    // Update water level
-    setWaterLevel(currentWaterLevel);
+    // Only update state if value changed significantly to avoid re-renders
+    if (Math.abs(waterLevel - currentWaterLevel) > 0.05) {
+      setWaterLevel(currentWaterLevel);
+    }
   }, []);
   
   /**

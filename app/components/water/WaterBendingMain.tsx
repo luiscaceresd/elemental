@@ -9,14 +9,14 @@ import { getTerrainHeight } from '../../utils/terrain';
 
 interface WaterBendingProps {
   camera: THREE.Camera;
-  player: {
-    position: THREE.Vector3;
-    rotation: THREE.Euler;
-  };
+  characterPositionRef: React.RefObject<THREE.Vector3>;
+  isBendingRef: React.RefObject<boolean>;
+  crosshairPositionRef: React.RefObject<THREE.Vector3>;
   scene: THREE.Scene;
   environmentObjects?: THREE.Object3D[];
   registerUpdate?: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
   domElement?: HTMLCanvasElement;
+  debug?: boolean;
 }
 
 /**
@@ -28,13 +28,16 @@ interface WaterBendingProps {
  * - Input handling
  * - Water meter UI
  */
-export function WaterBendingMain({ 
-  camera, 
-  player, 
-  scene, 
+export function WaterBendingMain({
+  camera,
+  characterPositionRef,
+  isBendingRef,
+  crosshairPositionRef,
+  scene,
   environmentObjects = [],
   registerUpdate,
-  domElement
+  domElement,
+  debug = false
 }: WaterBendingProps) {
   // Configuration constants
   const MAX_WATER_CAPACITY = 100;
@@ -42,30 +45,31 @@ export function WaterBendingMain({
   const PROJECTILE_LIFESPAN = 6000;
   const COLLECTION_DISTANCE = 1.5;
   const BELT_RADIUS = 2.5;
-  
+
   // State
   const [waterAmount, setWaterAmount] = useState(0);
   const waterRef = useRef<number>(0);
   const [isBending, setIsBending] = useState(false);
   const [chargeLevel, setChargeLevel] = useState(0);
   const lastShotTime = useRef(0);
-  
+
   // Initialize water projectile system
   const projectileSystem = useWaterProjectiles(scene, {
     maxActive: 50,
     lifespan: PROJECTILE_LIFESPAN,
     terrainHeightFn: getTerrainHeight
   });
-  
+
   // Initialize water collection system
   const collectionSystem = useWaterCollection(scene, {
     maxActive: 100,
-    attractionDistance: 10,
-    attractionStrength: 20,
-    collectionDistance: COLLECTION_DISTANCE,
-    maxWaterCapacity: MAX_WATER_CAPACITY
+    attractionDistance: 15,
+    attractionStrength: 50,
+    collectionDistance: 0.8,
+    maxWaterCapacity: MAX_WATER_CAPACITY,
+    debug: true // Add debug mode to see what's happening
   });
-  
+
   // Initialize water belt effect
   const beltSystem = useWaterBeltEffect(scene, {
     radius: BELT_RADIUS,
@@ -75,102 +79,180 @@ export function WaterBendingMain({
     opacity: 0.7,
     minOpacity: 0.2
   });
-  
+
   // Input actions
   const inputActions = {
     onStartCharging: useCallback(() => {
       // Always set bending to true to enable water collection
       setIsBending(true);
-      
+      if (isBendingRef.current !== null) {
+        isBendingRef.current = true;
+      }
+
       // Only show water belt if we have enough water
       if (waterRef.current >= WATER_COST_PER_SPEAR) {
         beltSystem.setVisibility(true);
       }
-    }, [beltSystem]),
-    
+    }, [beltSystem, isBendingRef]),
+
     onCancelCharging: useCallback(() => {
       setIsBending(false);
+      if (isBendingRef.current !== null) {
+        isBendingRef.current = false;
+      }
       beltSystem.setVisibility(false);
       setChargeLevel(0);
-    }, [beltSystem]),
-    
+    }, [beltSystem, isBendingRef]),
+
     onShoot: useCallback((direction: THREE.Vector3) => {
       // Only shoot if we have enough water and not recently shot
-      if (waterRef.current >= WATER_COST_PER_SPEAR && 
-          Date.now() - lastShotTime.current > 200) {
-        
+      if (waterRef.current >= WATER_COST_PER_SPEAR &&
+        Date.now() - lastShotTime.current > 200) {
+
         // Get player position to shoot from
-        const shootPosition = player.position.clone();
+        const characterPosition = characterPositionRef.current || new THREE.Vector3();
+        const shootPosition = characterPosition.clone();
         shootPosition.y += 1.5; // Adjust for height
-        
+
         // Create projectile
         projectileSystem.createProjectile(shootPosition, direction);
-        
+
         // Decrease water amount
         const newWaterAmount = Math.max(0, waterRef.current - WATER_COST_PER_SPEAR);
         setWaterAmount(newWaterAmount);
         waterRef.current = newWaterAmount;
-        
+
         // Reset charge level
         setChargeLevel(0);
-        
+
         // Update last shot time
         lastShotTime.current = Date.now();
-        
+
         // Hide belt if not enough water left
         if (newWaterAmount < WATER_COST_PER_SPEAR) {
           beltSystem.setVisibility(false);
         }
       }
-    }, [player.position, projectileSystem, beltSystem]),
-    
+    }, [characterPositionRef, projectileSystem, beltSystem]),
+
     onMove: useCallback((position: THREE.Vector3) => {
       // Nothing special for movement in this implementation
     }, [])
   };
-  
+
   // Initialize input system
   const inputSystem = useWaterBendingInput(inputActions, {
     camera,
     cameraDistance: 5,
     canvas: domElement
   });
-  
+
   // Keep waterRef in sync with waterAmount
   useEffect(() => {
     waterRef.current = waterAmount;
     collectionSystem.setWaterAmount(waterAmount);
   }, [waterAmount, collectionSystem]);
-  
+
+  // Generate water drops from environment
+  const generateEnvironmentWaterDrops = useCallback((delta: number) => {
+    if (!characterPositionRef.current) return;
+
+    // Example: Generate water drops near water sources or from rain
+    // In a real implementation, this would identify water sources from the environment
+
+    // Create water drops more frequently to ensure there are plenty of drops to collect
+    // Increase the spawn rate significantly
+    if (Math.random() < 0.1 * delta) {
+      // Create a drop at a random position near the player
+      const characterPosition = characterPositionRef.current;
+      const dropPosition = characterPosition.clone();
+      // Create drops closer to the player
+      dropPosition.x += (Math.random() - 0.5) * 10;
+      dropPosition.z += (Math.random() - 0.5) * 10;
+      dropPosition.y = Math.max(getTerrainHeight(dropPosition.x, dropPosition.z) + 5, dropPosition.y);
+
+      // Random initial velocity using CANNON.js physics
+      const velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 2,  // Random X velocity
+        -2 - Math.random() * 2,     // Downward Y velocity
+        (Math.random() - 0.5) * 2   // Random Z velocity
+      );
+
+      // Create multiple drops at once for better visibility
+      for (let i = 0; i < 3; i++) {
+        const offsetPos = dropPosition.clone();
+        offsetPos.x += (Math.random() - 0.5) * 2;
+        offsetPos.z += (Math.random() - 0.5) * 2;
+        // Slight velocity variation for each drop
+        const dropVelocity = velocity.clone();
+        dropVelocity.x += (Math.random() - 0.5) * 0.5;
+        dropVelocity.z += (Math.random() - 0.5) * 0.5;
+        collectionSystem.createWaterDrop(offsetPos, dropVelocity);
+      }
+
+      if (debug) {
+        console.log("Generated water drops at", dropPosition);
+      }
+    }
+  }, [characterPositionRef, collectionSystem, debug]);
+
   // Create update function for the animation loop
   const updateFunction = useCallback((delta: number) => {
     // Update projectiles
     projectileSystem.update(delta);
-    
+
     // Update input
-    inputSystem.update(delta);
-    const inputState = inputSystem.getInputState();
-    setChargeLevel(inputState.chargeLevel);
-    
-    // Update water collection
-    const attractionPoint = isBending ? player.position.clone() : null;
+    const currentInputState = inputSystem.update(delta);
+    // Use the input state directly from the update call, rather than getInputState
+    setChargeLevel(currentInputState.chargeLevel);
+
+    // Update water collection - only use attraction point when actively bending AND clicking
+    let attractionPoint = null;
+
+    // Only set an attraction point when both conditions are met:
+    // 1. isBendingRef indicates we're in bending mode
+    // 2. currentInputState.isClicking indicates the user is clicking
+    if (isBendingRef.current &&
+      crosshairPositionRef.current &&
+      currentInputState.isClicking) {
+
+      // Use the crosshair position as the attraction point
+      attractionPoint = crosshairPositionRef.current.clone();
+
+      // Debug log to confirm we have a valid attraction point
+      console.log("Water bending active at crosshair:",
+        attractionPoint.x.toFixed(2),
+        attractionPoint.y.toFixed(2),
+        attractionPoint.z.toFixed(2)
+      );
+    }
+
+    // Always update the collection system, but only pass attraction point when bending
     const collected = collectionSystem.update(delta, attractionPoint);
-    
+
     if (collected > 0) {
-      setWaterAmount(prev => Math.min(prev + collected, MAX_WATER_CAPACITY));
+      console.log(`Collected ${collected} water drops!`);
+      const newWaterAmount = Math.min(waterRef.current + collected, MAX_WATER_CAPACITY);
+      waterRef.current = newWaterAmount; // Update ref immediately
+
+      // Use requestAnimationFrame to batch updates and avoid render loops
+      requestAnimationFrame(() => {
+        setWaterAmount(newWaterAmount);
+      });
     }
-    
+
     // Update water belt
-    if (isBending) {
-      const beltPosition = player.position.clone();
+    if (isBendingRef.current && characterPositionRef.current) {
+      const characterPosition = characterPositionRef.current;
+      const beltPosition = characterPosition.clone();
       beltPosition.y += 1.2; // Position belt at character waist/chest
-      beltSystem.update(delta, beltPosition, waterAmount / MAX_WATER_CAPACITY);
+      beltSystem.update(delta, beltPosition, waterRef.current / MAX_WATER_CAPACITY);
     }
-    
-    // Generate water drops if there's a water source nearby
+
+    // Always generate water drops to ensure there's water to collect
     generateEnvironmentWaterDrops(delta);
-  }, [projectileSystem, inputSystem, isBending, player.position, collectionSystem, beltSystem, waterAmount]);
-  
+  }, [projectileSystem, inputSystem, isBendingRef, crosshairPositionRef, characterPositionRef, collectionSystem, beltSystem, generateEnvironmentWaterDrops]);
+
   // Register the update function if we have the registerUpdate prop
   useEffect(() => {
     if (registerUpdate) {
@@ -180,31 +262,7 @@ export function WaterBendingMain({
       return unregister;
     }
   }, [registerUpdate, updateFunction]);
-  
-  // Generate water drops from environment
-  const generateEnvironmentWaterDrops = useCallback((delta: number) => {
-    // Example: Generate water drops near water sources or from rain
-    // In a real implementation, this would identify water sources from the environment
-    
-    // Check if it's time to spawn a water drop (random chance)
-    if (Math.random() < 0.02 * delta) {
-      // Create a drop at a random position near the player
-      const dropPosition = player.position.clone();
-      dropPosition.x += (Math.random() - 0.5) * 20;
-      dropPosition.z += (Math.random() - 0.5) * 20;
-      dropPosition.y = Math.max(getTerrainHeight(dropPosition.x, dropPosition.z) + 5, dropPosition.y);
-      
-      // Random velocity
-      const velocity = new THREE.Vector3(
-        (Math.random() - 0.5) * 2,
-        -1 - Math.random() * 2,
-        (Math.random() - 0.5) * 2
-      );
-      
-      collectionSystem.createWaterDrop(dropPosition, velocity);
-    }
-  }, [player.position, collectionSystem]);
-  
+
   // Clean up when component unmounts
   useEffect(() => {
     return () => {
@@ -213,16 +271,14 @@ export function WaterBendingMain({
       inputSystem.cleanup();
     };
   }, [projectileSystem, collectionSystem, inputSystem]);
-  
+
   return (
     <>
-      {/* Water Meter UI */}
-      <WaterMeter 
-        waterAmount={waterAmount} 
-        maxAmount={MAX_WATER_CAPACITY}
-        chargeLevel={chargeLevel}
-        isCharging={isBending}
-        waterCost={WATER_COST_PER_SPEAR}
+      {/* Make sure to use correctly named props to match WaterMeter's expected interface */}
+      <WaterMeter
+        currentWater={waterAmount}
+        maxWater={MAX_WATER_CAPACITY}
+        requiredWater={WATER_COST_PER_SPEAR}
       />
     </>
   );

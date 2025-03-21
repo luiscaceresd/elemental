@@ -308,15 +308,18 @@ export function useWaterBendingInput(
    * Update input state (called in animation frame)
    */
   const update = useCallback((delta: number) => {
+    // Use a local variable to track if we need to update state
+    let needsStateUpdate = false;
+    let stateUpdates = {} as Partial<InputState>;
+    
     // Only update clickPosition from ref when needed (once per frame max)
     if (inputStateRef.current.isClicking && 
         (clickPositionRef.current.x !== inputStateRef.current.clickPosition.x || 
          clickPositionRef.current.y !== inputStateRef.current.clickPosition.y)) {
       
-      setInputState(prev => ({
-        ...prev,
-        clickPosition: clickPositionRef.current.clone()
-      }));
+      // Just update the ref without triggering a state update for position
+      // This avoids re-renders just for mouse position changes
+      inputStateRef.current.clickPosition = clickPositionRef.current.clone();
     }
     
     // Update charge level if charging
@@ -327,14 +330,43 @@ export function useWaterBendingInput(
       const newChargeLevel = Math.min(chargeTime / maxChargeTime, 1);
       
       // Only update if the value has changed significantly to reduce renders
-      if (Math.abs(newChargeLevel - inputStateRef.current.chargeLevel) > 0.01) {
-        setInputState(prev => ({
-          ...prev,
-          chargeLevel: newChargeLevel
-        }));
+      if (Math.abs(newChargeLevel - inputStateRef.current.chargeLevel) > 0.05) {
+        needsStateUpdate = true;
+        stateUpdates.chargeLevel = newChargeLevel;
+        
+        // Update the ref immediately
+        inputStateRef.current.chargeLevel = newChargeLevel;
       }
     }
-  }, []);
+    
+    // Only trigger React state update if something meaningful changed
+    if (needsStateUpdate) {
+      // Batch the React state update using rAF to avoid update loops
+      requestAnimationFrame(() => {
+        // Double-check we're not causing an update cycle
+        if (!inputStateRef.current.isCharging && stateUpdates.chargeLevel) {
+          // Don't update charge level if we're no longer charging
+          delete stateUpdates.chargeLevel;
+        }
+        
+        // Only update if we still have changes to make
+        if (Object.keys(stateUpdates).length > 0) {
+          setInputState(prev => ({
+            ...prev,
+            ...stateUpdates
+          }));
+        }
+      });
+    }
+    
+    // Update rayDirection if mouse position has changed
+    if (inputStateRef.current.isClicking) {
+      updateRayDirection(clickPositionRef.current.x, clickPositionRef.current.y);
+    }
+    
+    // Return the current state from the ref for immediate use
+    return inputStateRef.current;
+  }, [updateRayDirection]);
   
   /**
    * Get current input state

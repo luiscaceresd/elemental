@@ -29,6 +29,17 @@ export function initWaterPhysics(): CANNON.World {
     // Set up collision detection
     physicsWorld.broadphase = new CANNON.NaiveBroadphase();
     physicsWorld.allowSleep = true;
+    
+    // Create ground plane for water drops to collide with
+    const groundShape = new CANNON.Plane();
+    const groundBody = new CANNON.Body({
+      mass: 0, // Static body
+      shape: groundShape,
+      collisionFilterGroup: 2, // Group 2 for ground
+      collisionFilterMask: 1 | 4  // Collide with player (Group 1) and drops (Group 4)
+    });
+    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Make it horizontal
+    physicsWorld.addBody(groundBody);
   }
   
   return physicsWorld;
@@ -81,7 +92,9 @@ export function createWaterDropBody(
     shape,
     position: new CANNON.Vec3(position.x, position.y, position.z),
     linearDamping: DEFAULT_DAMPING,
-    angularDamping: DEFAULT_DAMPING
+    angularDamping: DEFAULT_DAMPING,
+    collisionFilterGroup: 4, // Group 4 for water drops
+    collisionFilterMask: 2    // Collide only with ground (Group 2)
   });
   
   // Set material properties

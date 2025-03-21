@@ -54,4 +54,4 @@ When a component exceeds or approaches the line limit, follow these guidelines t
    - Use container/presentational pattern where appropriate
    - Create data-fetching containers and pure presentational components
 
-Remember: Each component should do one thing well. If you can't describe a component's purpose in a single sentence, it probably needs to be divided
+Remember: Each component should do one thing well. If you can't describe a component's purpose in a single sentence, it probably needs to be divide

@@ -1,17 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { 
-  createWaterDropBody, 
-  updateWaterPhysics, 
-  removeBodyFromWorld,
-  applyAttractionForce
-} from '../physics/waterProjectilePhysics';
-import { 
-  ObjectPool, 
-  PhysicsObject,
-  createWaterDropMeshPool
-} from '../utils/objectPool';
+import { ObjectPool } from '../utils/objectPool';
+
+// Define water drop type to avoid repetition
+interface WaterDrop {
+  mesh: THREE.Mesh;
+  body: CANNON.Body;
+  isActive: boolean;
+  createdAt: number;
+}
 
 interface WaterCollectionOptions {
   maxActive?: number;
@@ -30,317 +28,440 @@ export function useWaterCollection(
   scene: THREE.Scene,
   options: WaterCollectionOptions = {}
 ) {
-  // Extract options with defaults
+  // Configuration with defaults
   const {
     maxActive = 100,
-    lifespan = 15000,
-    attractionDistance = 15, // Increased attraction distance
-    attractionStrength = 30, // Increased attraction strength
-    collectionDistance = 2.5, // Increased collection distance
+    lifespan = 5000,
+    attractionDistance = 5,
+    attractionStrength = 10,
+    collectionDistance = 1,
     maxWaterCapacity = 100,
     debug = false
   } = options;
-  
-  // State for water amount
+
+  // State
   const [waterAmount, setWaterAmount] = useState(0);
-  
-  // Reference to the water drop pool
-  const dropPoolRef = useRef<ObjectPool<PhysicsObject>>(null!);
-  
-  // Reference to active drops for updating
-  const activeDropsRef = useRef<PhysicsObject[]>([]);
-  
-  // Reference to water specific objects in the scene for processing
+
+  // References
   const waterObjectsRef = useRef<THREE.Object3D[]>([]);
-  
-  // Initialize physics and pool on mount
+  const lastScannedTimeRef = useRef<number>(0);
+  const physicsWorldRef = useRef<CANNON.World | null>(null);
+  const waterPoolRef = useRef<ObjectPool<WaterDrop> | undefined>(undefined);
+  const activeDropsRef = useRef<WaterDrop[]>([]);
+
+  // Initialize physics world
   useEffect(() => {
-    // Create water drop mesh pool
-    const dropMeshPool = createWaterDropMeshPool(maxActive);
-    
-    // Create combined physics object pool
-    dropPoolRef.current = new ObjectPool<PhysicsObject>(
-      // Create function
-      () => ({
-        mesh: dropMeshPool.get(),
-        body: createWaterDropBody(
-          new THREE.Vector3(0, 0, 0), 
-          new THREE.Vector3(0, -1, 0)
-        ),
-        createdAt: Date.now()
-      }),
-      // Reset function
-      (obj) => {
-        obj.mesh.visible = false;
-        scene.remove(obj.mesh);
-        removeBodyFromWorld(obj.body);
-        obj.createdAt = Date.now();
-      },
-      // Dispose function
-      (obj) => {
-        scene.remove(obj.mesh);
-        removeBodyFromWorld(obj.body);
+    const world = new CANNON.World({
+      gravity: new CANNON.Vec3(0, -9.82, 0)
+    });
+
+    // Add a ground plane at y=0
+    const groundShape = new CANNON.Plane();
+    const groundBody = new CANNON.Body({
+      mass: 0, // Static body (mass = 0)
+      shape: groundShape,
+    });
+    // Rotate the plane to be horizontal (default is vertical)
+    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+    world.addBody(groundBody);
+
+    physicsWorldRef.current = world;
+
+    return () => {
+      physicsWorldRef.current = null;
+    };
+  }, []);
+
+  // Initialize object pool for water drops
+  useEffect(() => {
+    if (!scene) return;
+
+    // Create a reusable water drop
+    const createWaterDrop = () => {
+      // Create mesh for water drop
+      const geometry = new THREE.SphereGeometry(0.1, 8, 8);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0x00aaff,
+        metalness: 0.1,
+        roughness: 0.2,
+        transparent: true,
+        opacity: 0.7
+      });
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.isWater = true; // Mark as water for identification
+
+      // Create physics body
+      const shape = new CANNON.Sphere(0.1);
+      const body = new CANNON.Body({
+        mass: 0.5,
+        shape,
+        material: new CANNON.Material({
+          friction: 0.1,
+          restitution: 0.6
+        })
+      });
+
+      return {
+        mesh,
+        body,
+        isActive: false,
+        createdAt: 0
+      };
+    };
+
+    // Create object pool
+    const resetObject = (obj: WaterDrop) => {
+      obj.isActive = false;
+      obj.body.position.set(0, -1000, 0); // Move far away
+      obj.body.velocity.set(0, 0, 0);
+      obj.body.angularVelocity.set(0, 0, 0);
+      obj.mesh.visible = false;
+      scene.remove(obj.mesh);
+    };
+
+    const activateObject = (obj: WaterDrop) => {
+      obj.isActive = true;
+      obj.createdAt = Date.now();
+      obj.mesh.visible = true;
+      scene.add(obj.mesh);
+    };
+
+    const pool = new ObjectPool<WaterDrop>(
+      createWaterDrop,
+      resetObject,
+      activateObject,
+      maxActive // Important: honor the maxActive parameter
+    );
+
+    waterPoolRef.current = pool;
+
+    // Scan for water objects initially
+    findWaterObjectsInScene();
+
+    return () => {
+      // Clean up on unmount
+      // Since we don't have getAll() on ObjectPool, we'll use our active drops reference
+      activeDropsRef.current.forEach(obj => {
+        resetObject(obj);
         if (obj.mesh.geometry) {
           obj.mesh.geometry.dispose();
         }
         if (obj.mesh.material && !Array.isArray(obj.mesh.material)) {
           obj.mesh.material.dispose();
         }
-      },
-      // Initial size
-      0,
-      // Max size
-      maxActive
-    );
-    
-    // Find water objects in the scene
-    findWaterObjects(scene);
-    
-    // Cleanup on unmount
-    return () => {
-      if (dropPoolRef.current) {
-        dropPoolRef.current.clear();
-      }
+      });
+      activeDropsRef.current = [];
     };
   }, [scene, maxActive]);
-  
-  /**
-   * Find water objects in the scene by checking userData.isWater
-   */
-  const findWaterObjects = useCallback((sceneToSearch: THREE.Object3D) => {
-    // Reset array
-    waterObjectsRef.current = [];
-    
+
+  // Function to find water objects in the scene
+  const findWaterObjectsInScene = useCallback(() => {
+    if (!scene) return;
+
+    // Don't scan too frequently
+    const now = Date.now();
+    if (now - lastScannedTimeRef.current < 2000) return;
+    lastScannedTimeRef.current = now;
+
+    // Find all water objects in the scene
+    const waterObjects: THREE.Object3D[] = [];
+
     // Recursive function to find water objects
-    const traverse = (object: THREE.Object3D) => {
-      if (object.userData && object.userData.isWater) {
-        waterObjectsRef.current.push(object);
+    const findWaterObjects = (obj: THREE.Object3D) => {
+      // Check if this object is water (has isWater=true in userData)
+      if (obj.userData && obj.userData.isWater === true) {
+        waterObjects.push(obj);
+        if (debug) {
+          console.log("Found water object:", obj.name || "unnamed water");
+        }
       }
-      
-      object.children.forEach(traverse);
+
+      // Check children recursively
+      obj.children.forEach(child => {
+        findWaterObjects(child);
+      });
     };
-    
-    // Start traversal
-    traverse(sceneToSearch);
-    
-    if (debug) {
-      console.log(`[WaterCollection] Found ${waterObjectsRef.current.length} water objects in scene`);
+
+    // Start with the scene
+    findWaterObjects(scene);
+
+    // Update reference
+    waterObjectsRef.current = waterObjects;
+
+    if (debug && waterObjects.length > 0) {
+      console.log(`Found ${waterObjects.length} water objects in scene`);
     }
-  }, [debug]);
-  
-  /**
-   * Create a new water drop
-   */
+
+    return waterObjects;
+  }, [scene, debug]);
+
+  // Create a new water drop
   const createWaterDrop = useCallback((
     position: THREE.Vector3,
-    velocity?: THREE.Vector3
+    velocity: THREE.Vector3 = new THREE.Vector3(0, 0, 0)
   ) => {
-    if (!dropPoolRef.current) return;
-    
-    // Get a water drop from the pool
-    const waterDrop = dropPoolRef.current.get();
-    
-    // Add mesh to scene
-    waterDrop.mesh.visible = true;
-    scene.add(waterDrop.mesh);
-    
-    // Create a new physics body
-    removeBodyFromWorld(waterDrop.body);
-    waterDrop.body = createWaterDropBody(position, velocity);
-    
-    // Set mesh position
+    const world = physicsWorldRef.current;
+    const pool = waterPoolRef.current;
+
+    if (!world || !pool) return;
+
+    // Get an object from the pool
+    const waterDrop = pool.get();
+
+    if (!waterDrop) {
+      if (debug) {
+        console.warn("Water drop pool exhausted, cannot create more drops");
+      }
+      return;
+    }
+
+    // Position the water drop
     waterDrop.mesh.position.copy(position);
-    
-    // Reset creation timestamp
-    waterDrop.createdAt = Date.now();
-    
+    waterDrop.body.position.copy(new CANNON.Vec3(
+      position.x,
+      position.y,
+      position.z
+    ));
+
+    // Apply velocity
+    waterDrop.body.velocity.copy(new CANNON.Vec3(
+      velocity.x,
+      velocity.y,
+      velocity.z
+    ));
+
+    // Add body to physics world if not already added
+    if (!world.bodies.includes(waterDrop.body)) {
+      world.addBody(waterDrop.body);
+    }
+
     // Add to active drops
     activeDropsRef.current.push(waterDrop);
-    
+
     if (debug) {
-      console.log(`[WaterCollection] Created water drop at ${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}`);
+      console.log("Created water drop at", position);
     }
-    
+
     return waterDrop;
-  }, [scene, debug]);
-  
-  /**
-   * Update all active water drops and handle collection
-   * @returns The number of drops collected in this update
-   */
+  }, [debug]);
+
+  // Update water drops
   const update = useCallback((
-    delta: number, 
-    attractionPoint: THREE.Vector3 | null
-  ): number => {
-    if (!dropPoolRef.current) return 0;
-    
-    const now = Date.now();
-    const expired: PhysicsObject[] = [];
-    let collected = 0;
-    
+    delta: number,
+    attractionPoint: THREE.Vector3 | null = null
+  ) => {
+    const world = physicsWorldRef.current;
+    const pool = waterPoolRef.current;
+
+    if (!world || !pool) return 0;
+
+    // Step physics world
+    world.step(Math.min(delta, 0.1));
+
+    // Debug log to track attraction point
+    if (debug && attractionPoint) {
+      console.log("Update called with attraction point:",
+        attractionPoint.x.toFixed(2),
+        attractionPoint.y.toFixed(2),
+        attractionPoint.z.toFixed(2),
+        "Active drops:", activeDropsRef.current.length
+      );
+    }
+
     // Update each active water drop
-    for (const waterDrop of activeDropsRef.current) {
-      // Check if drop has expired by time
-      if (now - waterDrop.createdAt > lifespan) {
-        expired.push(waterDrop);
-        continue;
+    let collected = 0;
+    let attractedCount = 0;
+    const now = Date.now();
+    const toRemove: WaterDrop[] = [];
+
+    // Scan for water objects periodically
+    if (Math.random() < 0.02) {
+      findWaterObjectsInScene();
+    }
+
+    // Update all drops in the pool
+    activeDropsRef.current.forEach(drop => {
+      // Check if the drop has expired
+      if (now - drop.createdAt > lifespan) {
+        toRemove.push(drop);
+        return;
       }
-      
-      // Apply attraction force if there's an attraction point
+
+      // Update mesh position from physics body
+      drop.mesh.position.copy(new THREE.Vector3(
+        drop.body.position.x,
+        drop.body.position.y,
+        drop.body.position.z
+      ));
+
+      drop.mesh.quaternion.copy(new THREE.Quaternion(
+        drop.body.quaternion.x,
+        drop.body.quaternion.y,
+        drop.body.quaternion.z,
+        drop.body.quaternion.w
+      ));
+
+      // If there's an attraction point, attract drops towards it
       if (attractionPoint) {
-        // Get current drop position
-        const dropPosition = new THREE.Vector3(
-          waterDrop.body.position.x,
-          waterDrop.body.position.y,
-          waterDrop.body.position.z
-        );
-        
-        // Calculate distance
-        const distance = dropPosition.distanceTo(attractionPoint);
-        
-        // Apply stronger attraction within range
-        if (distance < attractionDistance) {
-          // Apply attraction with stronger force for closer drops
-          const strengthMultiplier = 1.0 + (1.0 - distance / attractionDistance) * 2.0;
-          applyAttractionForce(
-            waterDrop.body,
-            attractionPoint,
-            attractionStrength * strengthMultiplier,
-            attractionDistance
+        const distanceToAttractionPoint = drop.mesh.position.distanceTo(attractionPoint);
+
+        // Apply attraction force if within attraction distance
+        if (distanceToAttractionPoint < attractionDistance) {
+          // Create a direction vector pointing from drop to attraction point
+          const directionVector = new CANNON.Vec3(
+            attractionPoint.x - drop.body.position.x,
+            attractionPoint.y - drop.body.position.y,
+            attractionPoint.z - drop.body.position.z
           );
-          
-          // Check if water drop is collected (close enough to attraction point)
-          if (distance < collectionDistance) {
-            expired.push(waterDrop);
+          // Normalize it
+          directionVector.normalize();
+
+          // Calculate force based on distance - exponential scaling for stronger pull when closer
+          const distanceRatio = distanceToAttractionPoint / attractionDistance;
+          // Exponential curve: stronger when closer (1-distance)^2
+          const forceMagnitude =
+            attractionStrength * Math.pow(1 - distanceRatio, 2);
+
+          // Apply force in the direction of attraction
+          const force = new CANNON.Vec3(
+            directionVector.x * forceMagnitude,
+            directionVector.y * forceMagnitude,
+            directionVector.z * forceMagnitude
+          );
+
+          // Apply a velocity dampening factor when close to make precise collection easier
+          if (distanceToAttractionPoint < attractionDistance * 0.4) {
+            // Slow down the drop as it gets closer to the attraction point
+            const dampingFactor = 0.8;
+            drop.body.velocity.x *= dampingFactor;
+            drop.body.velocity.z *= dampingFactor;
+          }
+
+          drop.body.applyForce(force);
+          attractedCount++;
+
+          // Collect water drop if close enough
+          if (distanceToAttractionPoint < collectionDistance) {
             collected++;
-            
+            toRemove.push(drop);
+
             if (debug) {
-              console.log(`[WaterCollection] Collected water drop at distance ${distance.toFixed(2)} (limit: ${collectionDistance})`);
+              console.log("Collected water drop - distance:", distanceToAttractionPoint.toFixed(2));
             }
-            
-            continue;
           }
         }
       }
-      
-      // Update mesh position based on physics body
-      const { position, quaternion } = waterDrop.body;
-      waterDrop.mesh.position.set(position.x, position.y, position.z);
-      waterDrop.mesh.quaternion.set(
-        quaternion.x,
-        quaternion.y,
-        quaternion.z,
-        quaternion.w
-      );
+    });
+
+    // Log attracted drops count for debugging
+    if (debug && attractionPoint && attractedCount > 0) {
+      console.log(`Attracted ${attractedCount} drops, collected ${collected}`);
     }
-    
-    // Release expired drops
-    for (const waterDrop of expired) {
-      removeWaterDrop(waterDrop);
-    }
-    
-    // Update water amount
+
+    // Remove dropped items
+    toRemove.forEach(drop => {
+      // Remove from active list
+      const index = activeDropsRef.current.indexOf(drop);
+      if (index !== -1) {
+        activeDropsRef.current.splice(index, 1);
+      }
+      // Return to pool
+      pool.release(drop);
+    });
+
+    // Update water amount if collected any
     if (collected > 0) {
-      setWaterAmount(prev => {
-        const newAmount = Math.min(prev + collected, maxWaterCapacity);
-        if (debug) {
-          console.log(`[WaterCollection] Water amount: ${prev} -> ${newAmount} (collected: ${collected})`);
-        }
-        return newAmount;
-      });
+      setWaterAmount(prev => Math.min(prev + collected, maxWaterCapacity));
     }
-    
-    // Auto-replenish drops from water objects in scene
-    if (Math.random() < 0.05 * delta && waterObjectsRef.current.length > 0) {
-      createDropsFromWaterObjects();
-    }
-    
+
     return collected;
-  }, [lifespan, attractionDistance, attractionStrength, collectionDistance, maxWaterCapacity, createWaterDrop, debug]);
-  
-  /**
-   * Create water drops from water objects in the scene
-   */
-  const createDropsFromWaterObjects = useCallback(() => {
-    if (waterObjectsRef.current.length === 0) return;
-    
-    // Select a random water object
-    const waterObject = waterObjectsRef.current[
-      Math.floor(Math.random() * waterObjectsRef.current.length)
-    ];
-    
-    // Create a drop at a random point on its surface
-    const position = waterObject.position.clone();
-    
-    // If it's a mesh with geometry, try to get a random point on surface
-    if (waterObject instanceof THREE.Mesh && waterObject.geometry) {
-      // Add a small random offset
-      position.x += (Math.random() - 0.5) * 2;
-      position.z += (Math.random() - 0.5) * 2;
-      
-      // Adjust Y position to be slightly above the water object
-      position.y += 0.5;
+  }, [
+    attractionDistance,
+    attractionStrength,
+    collectionDistance,
+    lifespan,
+    findWaterObjectsInScene,
+    debug,
+    waterAmount,
+    maxWaterCapacity
+  ]);
+
+  // Set water amount explicitly
+  const setExplicitWaterAmount = useCallback((amount: number) => {
+    setWaterAmount(amount);
+  }, []);
+
+  // Create water drops from a water source
+  const createWaterDropsFromSource = useCallback((
+    source: THREE.Object3D,
+    count: number = 1
+  ) => {
+    if (!source) return;
+
+    // Get position of the water source
+    const position = new THREE.Vector3();
+    source.getWorldPosition(position);
+
+    // Create water drops
+    for (let i = 0; i < count; i++) {
+      // Add some randomness to position
+      const dropPosition = position.clone().add(
+        new THREE.Vector3(
+          (Math.random() - 0.5) * 0.5,
+          (Math.random()) * 0.2,
+          (Math.random() - 0.5) * 0.5
+        )
+      );
+
+      // Random velocity, mainly downward
+      const velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        -2 - Math.random() * 2,
+        (Math.random() - 0.5) * 2
+      );
+
+      createWaterDrop(dropPosition, velocity);
     }
-    
-    // Create the drop with a small upward velocity
-    const velocity = new THREE.Vector3(
-      (Math.random() - 0.5) * 0.5,
-      1 + Math.random() * 0.5,
-      (Math.random() - 0.5) * 0.5
-    );
-    
-    createWaterDrop(position, velocity);
   }, [createWaterDrop]);
-  
-  /**
-   * Remove a specific water drop
-   */
-  const removeWaterDrop = useCallback((waterDrop: PhysicsObject) => {
-    if (!dropPoolRef.current) return;
-    
-    // Find and remove from active list
-    const index = activeDropsRef.current.indexOf(waterDrop);
+
+  // Remove a specific water drop
+  const removeWaterDrop = useCallback((drop: WaterDrop) => {
+    const pool = waterPoolRef.current;
+    if (!pool || !drop) return;
+
+    // Remove from active list
+    const index = activeDropsRef.current.indexOf(drop);
     if (index !== -1) {
       activeDropsRef.current.splice(index, 1);
     }
-    
-    // Return to pool
-    dropPoolRef.current.release(waterDrop);
+
+    pool.release(drop);
   }, []);
-  
-  /**
-   * Clear all water drops
-   */
+
+  // Clear all active water drops
   const clear = useCallback(() => {
-    if (!dropPoolRef.current) return;
-    
-    // Release all active drops
-    for (const waterDrop of [...activeDropsRef.current]) {
-      removeWaterDrop(waterDrop);
-    }
-    
+    const pool = waterPoolRef.current;
+    if (!pool) return;
+
+    // Clear all active drops
+    [...activeDropsRef.current].forEach(drop => {
+      pool.release(drop);
+    });
     activeDropsRef.current = [];
-  }, [removeWaterDrop]);
-  
-  /**
-   * Set water amount explicitly
-   */
-  const setWaterAmountExplicit = useCallback((amount: number) => {
-    setWaterAmount(Math.min(Math.max(amount, 0), maxWaterCapacity));
-  }, [maxWaterCapacity]);
-  
-  /**
-   * Get current water amount
-   */
-  const getWaterAmount = useCallback(() => {
-    return waterAmount;
-  }, [waterAmount]);
-  
+  }, []);
+
+  // Return the hook API
   return {
     createWaterDrop,
     update,
     clear,
-    getWaterAmount,
-    setWaterAmount: setWaterAmountExplicit
+    removeWaterDrop,
+    createWaterDropsFromSource,
+    setWaterAmount: setExplicitWaterAmount,
+    getWaterAmount: () => waterAmount,
+    getWaterObjects: () => waterObjectsRef.current,
   };
-} 
+}

@@ -7,7 +7,6 @@ import CameraController from './CameraController';
 import { WaterBending } from './WaterBending';
 import MobileControls from './MobileControls';
 import World from './World';
-import Pond from './Pond';
 import Crosshair from './Crosshair';
 
 // Add a type for functions with an identifier
@@ -49,6 +48,62 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
   // New refs for waterbending
   const isBendingRef = useRef<boolean>(false);
   const crosshairPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+
+  // Add function to update crosshair position using raycasting
+  const updateCrosshairPosition = useCallback((event: MouseEvent) => {
+    if (!cameraRef.current || !sceneRef.current) return;
+    
+    // Get mouse position in normalized device coordinates (-1 to +1)
+    const rect = (event.target as HTMLElement).getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    
+    // Create raycaster from mouse position and camera
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(new THREE.Vector2(x, y), cameraRef.current);
+    
+    // Create a virtual ground plane for raycasting
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // y=0 plane
+    const target = new THREE.Vector3();
+    
+    // Find intersection of ray with ground plane
+    const ray = raycaster.ray;
+    if (ray.intersectPlane(groundPlane, target)) {
+      // Update crosshair position based on ground intersection
+      crosshairPositionRef.current.copy(target);
+      
+      // Debug log to see where the crosshair is positioned
+      console.log("Crosshair updated to:", 
+        crosshairPositionRef.current.x.toFixed(2),
+        crosshairPositionRef.current.y.toFixed(2),
+        crosshairPositionRef.current.z.toFixed(2)
+      );
+    } else {
+      // If no intersection with ground (looking up at sky), use a point far along the ray
+      const farPoint = ray.origin.clone().add(
+        ray.direction.clone().multiplyScalar(100)
+      );
+      crosshairPositionRef.current.copy(farPoint);
+    }
+  }, []);
+  
+  // Add event listeners for mouse movement
+  useEffect(() => {
+    const canvas = rendererRef.current?.domElement;
+    if (!canvas) return;
+    
+    const handleMouseMove = (event: MouseEvent) => {
+      // Always update crosshair on mouse move
+      updateCrosshairPosition(event);
+    };
+    
+    // Add mouse event listeners
+    canvas.addEventListener('mousemove', handleMouseMove);
+    
+    return () => {
+      canvas.removeEventListener('mousemove', handleMouseMove);
+    };
+  }, [updateCrosshairPosition, rendererRef.current]);
 
   // Detect if we're on a mobile device - this effect is necessary as it involves window APIs
   useEffect(() => {
@@ -226,6 +281,19 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     if (characterPositionRef.current) {
       // Make sure to create a clean copy to avoid reference issues
       characterPositionRef.current.copy(position);
+      
+      // Expose character position to the water particles system
+      if (typeof window !== 'undefined') {
+        // @ts-expect-error - Exposed for WaterParticles component
+        window.characterPosition = characterPositionRef.current;
+        
+        // Also update water particles system if the API is available
+        // @ts-expect-error - Use the API provided by WaterParticles
+        if (window.updateWaterParticlesPlayerPos) {
+          // @ts-expect-error - Call the function
+          window.updateWaterParticlesPlayerPos(characterPositionRef.current);
+        }
+      }
     }
   }, []);
 
@@ -258,24 +326,13 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
   return (
     <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      {/* Replace static crosshair with dynamic component */}
-      <Crosshair />
+      {/* Pass isBendingRef to Crosshair */}
+      <Crosshair isBendingRef={isBendingRef} />
 
       {sceneReady && sceneRef.current && rendererRef.current && cameraRef.current && characterPositionRef.current && (
         <>
           {/* Add the World component for Ghibli-style environment */}
           <World
-            scene={sceneRef.current}
-            isBendingRef={isBendingRef}
-            crosshairPositionRef={crosshairPositionRef}
-            registerUpdate={registerUpdate}
-          />
-
-          {/* Add pond directly (not needed if already added in World) */}
-          <Pond
-            position={new THREE.Vector3(20, 0, 20)}
-            size={15}
-            depth={3}
             scene={sceneRef.current}
             isBendingRef={isBendingRef}
             crosshairPositionRef={crosshairPositionRef}
