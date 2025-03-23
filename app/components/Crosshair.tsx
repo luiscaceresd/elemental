@@ -2,11 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-interface CrosshairProps {
-  isBendingRef?: React.RefObject<boolean>;
-}
-
-export default function Crosshair({ isBendingRef }: CrosshairProps = {}) {
+export default function Crosshair() {
   // State to track if water bending is active
   const [isBending, setIsBending] = useState(false);
 
@@ -18,20 +14,12 @@ export default function Crosshair({ isBendingRef }: CrosshairProps = {}) {
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button === 0) { // Left click
         setIsBending(true);
-        // Update the shared ref
-        if (isBendingRef && isBendingRef.current !== null) {
-          isBendingRef.current = true;
-        }
       }
     };
 
     const handleMouseUp = (e: MouseEvent) => {
       if (e.button === 0) { // Left click
         setIsBending(false);
-        // Update the shared ref
-        if (isBendingRef && isBendingRef.current !== null) {
-          isBendingRef.current = false;
-        }
       }
     };
 
@@ -63,7 +51,7 @@ export default function Crosshair({ isBendingRef }: CrosshairProps = {}) {
       window.removeEventListener('mouseup', handleMouseUp);
       cancelAnimationFrame(animationFrame);
     };
-  }, [isBending, isBendingRef]);
+  }, [isBending]);
 
   // Calculate styles based on bending state
   const crosshairSize = 24 * scale;

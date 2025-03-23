@@ -6,19 +6,6 @@ import { createNoise2D } from 'simplex-noise';
 import Tree from './Tree';
 import Pond from './Pond';
 
-// Define a window with terrain height function for type safety
-interface WindowWithTerrain extends Window {
-  getTerrainHeight?: (x: number, z: number) => number;
-}
-
-// Set getTerrainHeight immediately when the file loads
-if (typeof window !== 'undefined') {
-  const customWindow = window as WindowWithTerrain;
-  customWindow.getTerrainHeight = (x: number, z: number) => {
-    return 0; // Always return 0 for flat terrain
-  };
-}
-
 interface WorldProps {
   scene: THREE.Scene;
   isBendingRef: React.MutableRefObject<boolean>;
@@ -26,52 +13,64 @@ interface WorldProps {
   registerUpdate: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
 }
 
-const getTerrainValueAtPosition = (
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  x: number, 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  z: number
-): number => {
-  return 0; // Always return flat terrain
-};
-
 export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate }: WorldProps) {
   const [treePositions, setTreePositions] = useState<THREE.Vector3[]>([]);
   const [pondPositions, setPondPositions] = useState<{ position: THREE.Vector3, size: number, depth: number }[]>([]);
 
   useEffect(() => {
     const setupWorld = async () => {
-      // window.getTerrainHeight is already set above, no need to redefine here
-      
+      const THREE = await import('three');
       const noise2D = createNoise2D(); // Initialize Simplex noise
 
-      // --- Terrain with flat surface ---
+      // --- Terrain with enhanced noise for natural hills and valleys ---
       const terrainWidth = 1000; // Size of the playable area
       const terrainHeight = 1000;
       const terrainSegments = 150; // Increased for more detail
       const geometry = new THREE.PlaneGeometry(terrainWidth, terrainHeight, terrainSegments, terrainSegments);
       geometry.rotateX(-Math.PI / 2); // Lay flat on the ground
 
-      // Define pond locations (but now they'll be flat)
+      // Define pond locations
       const ponds = [
-        { center: new THREE.Vector2(20, 20), radius: 15, depth: 0.1 },
-        { center: new THREE.Vector2(-50, 30), radius: 20, depth: 0.1 },
-        { center: new THREE.Vector2(60, -40), radius: 12, depth: 0.1 },
-        { center: new THREE.Vector2(-10, -25), radius: 18, depth: 0.1 },
+        { center: new THREE.Vector2(20, 20), radius: 15, depth: 3 },
+        { center: new THREE.Vector2(-50, 30), radius: 20, depth: 4 },
+        { center: new THREE.Vector2(60, -40), radius: 12, depth: 2.5 },
       ];
 
-      // Fill heightmap with zeros for flat terrain
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const heightmap = new Float32Array((terrainSegments + 1) * (terrainSegments + 1)).fill(0);
+      // Create heightmap with natural terrain using multiple Simplex noise octaves
+      const heightmap = new Float32Array((terrainSegments + 1) * (terrainSegments + 1));
 
-      // Apply heightmap to terrain vertices (all zeros for flat terrain)
+      for (let x = 0; x <= terrainSegments; x++) {
+        for (let z = 0; z <= terrainSegments; z++) {
+          const posX = (x / terrainSegments) * terrainWidth - terrainWidth / 2;
+          const posZ = (z / terrainSegments) * terrainHeight - terrainHeight / 2;
+
+          // Set base terrain to flat (height 0)
+          let heightValue = 0;
+
+          // Create depressions for ponds
+          for (const pond of ponds) {
+            const distance = new THREE.Vector2(posX, posZ).distanceTo(pond.center);
+            if (distance < pond.radius) {
+              // Smooth depression using cosine function
+              const normalizedDist = distance / pond.radius;
+              const depression = (1 - Math.cos(normalizedDist * Math.PI)) / 2 * pond.depth;
+              heightValue -= pond.depth - depression;
+            }
+          }
+
+          const index = z * (terrainSegments + 1) + x;
+          heightmap[index] = heightValue;
+        }
+      }
+
+      // Apply heightmap to terrain vertices
       const positionAttribute = geometry.attributes.position;
       for (let i = 0; i < positionAttribute.count; i++) {
-        positionAttribute.setY(i, 0);
+        positionAttribute.setY(i, heightmap[i]);
       }
       geometry.computeVertexNormals();
 
-      // Procedural grass shader material
+      // Procedural grass and terrain shader material
       const uniforms = {
         time: { value: 0 },
       };
@@ -128,6 +127,8 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
             vec3 grassColor = vec3(0.1, 0.5, 0.1); // Green
             vec3 dirtColor = vec3(0.4, 0.3, 0.1);  // Brown
             vec3 darkGrassColor = vec3(0.05, 0.35, 0.05); // Dark green
+            vec3 rockColor = vec3(0.5, 0.5, 0.5);  // Gray
+            vec3 sandColor = vec3(0.76, 0.7, 0.5); // Tan for shore
             
             // Use noise at different scales for natural variation
             float largeNoise = snoise(vUv * 10.0);
@@ -135,24 +136,44 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
             float smallNoise = snoise(vUv * 100.0);
             float detailNoise = smallNoise * 0.2 + mediumNoise * 0.3 + largeNoise * 0.5;
             
+            // Height-based coloring with noise variation
+            float heightFactor = clamp((vPosition.y + 3.0) / 8.0, 0.0, 1.0);
+            
             // Slope-based coloring
             float slope = 1.0 - dot(vNormal, vec3(0.0, 1.0, 0.0));
+            
+            // Depression coloring (for ponds)
+            float isDepression = vPosition.y < -1.0 ? 1.0 : 0.0;
             
             // Blend colors based on terrain features
             vec3 color;
             
-            // Grass with noise-based variation
-            float grassMix = smoothstep(0.3, 0.7, snoise(vUv * 20.0) * 0.5 + 0.5);
-            color = mix(grassColor, darkGrassColor, grassMix);
-            
-            // Add small grass tufts
-            if (slope < 0.2 && smallNoise > 0.6) {
-              color += vec3(0.02, 0.07, 0.02) * (smallNoise - 0.6) * 2.5;
+            if (isDepression > 0.0) {
+              // Pond depression (darker, muddy)
+              float depthFactor = clamp(abs(vPosition.y) / 5.0, 0.0, 1.0);
+              float shoreFactor = 1.0 - depthFactor;
+              color = mix(sandColor, dirtColor, depthFactor);
+            } else if (slope > 0.4) {
+              // Rocky slopes
+              color = mix(dirtColor, rockColor, smoothstep(0.4, 0.7, slope));
+            } else {
+              // Grass with noise-based variation
+              float grassMix = smoothstep(0.3, 0.7, snoise(vUv * 20.0) * 0.5 + 0.5);
+              color = mix(grassColor, darkGrassColor, grassMix);
+              
+              // Add small grass tufts
+              if (slope < 0.2 && smallNoise > 0.6) {
+                color += vec3(0.02, 0.07, 0.02) * (smallNoise - 0.6) * 2.5;
+              }
+              
+              // Mix in dirt in some areas
+              float dirtAmount = smoothstep(0.4, 0.6, detailNoise);
+              color = mix(color, dirtColor, dirtAmount * 0.3);
             }
             
-            // Mix in dirt in some areas
-            float dirtAmount = smoothstep(0.4, 0.6, detailNoise);
-            color = mix(color, dirtColor, dirtAmount * 0.3);
+            // Apply height and slope variations
+            color = mix(color, rockColor, slope * slope);
+            color = mix(color, darkGrassColor, heightFactor * 0.5);
             
             // Apply some noise-based lighting variation
             float lightVar = smallNoise * 0.05 + 0.95;
@@ -261,12 +282,12 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       const sky = new THREE.Mesh(skyGeometry, skyMaterial);
       scene.add(sky);
 
-      // --- Tree Positions (now on flat terrain) ---
+      // --- Tree Positions (avoiding ponds) ---
       const positions: THREE.Vector3[] = [];
       for (let i = 0; i < 30; i++) {
         const x = (Math.random() - 0.5) * terrainWidth * 0.8; // Keep within bounds
         const z = (Math.random() - 0.5) * terrainHeight * 0.8;
-        
+
         // Check if the position is inside a pond
         let isInPond = false;
         for (const pond of ponds) {
@@ -276,10 +297,11 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
             break;
           }
         }
-        
+
         if (!isInPond) {
-          // All trees at y=0 since terrain is flat
-          positions.push(new THREE.Vector3(x, 0, z));
+          // Get terrain height at this position
+          const y = getTerrainHeightAt(x, z, terrainWidth, terrainHeight, terrainSegments, heightmap);
+          positions.push(new THREE.Vector3(x, y, z));
         }
       }
       setTreePositions(positions);
@@ -302,6 +324,53 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       update._id = 'terrainShaderUpdate';
       const removeUpdate = registerUpdate(update);
 
+      // Export terrain height function for other components
+      // @ts-expect-error - Property 'getTerrainHeight' does not exist on Window interface
+      window.getTerrainHeight = (x: number, z: number) => {
+        return getTerrainHeightAt(x, z, terrainWidth, terrainHeight, terrainSegments, heightmap);
+      };
+
+      // Helper function to get terrain height at a specific position
+      function getTerrainHeightAt(
+        x: number,
+        z: number,
+        width: number,
+        height: number,
+        segments: number,
+        heightmapData: Float32Array
+      ): number {
+        // Convert world coordinates to heightmap indices
+        const normalizedX = (x + width / 2) / width;
+        const normalizedZ = (z + height / 2) / height;
+
+        if (normalizedX < 0 || normalizedX > 1 || normalizedZ < 0 || normalizedZ > 1) {
+          return 0; // Out of bounds
+        }
+
+        const xIndex = Math.floor(normalizedX * segments);
+        const zIndex = Math.floor(normalizedZ * segments);
+
+        // Bilinear interpolation for smooth height
+        const x1 = Math.min(xIndex, segments - 1);
+        const x2 = Math.min(x1 + 1, segments);
+        const z1 = Math.min(zIndex, segments - 1);
+        const z2 = Math.min(z1 + 1, segments);
+
+        const xFrac = normalizedX * segments - x1;
+        const zFrac = normalizedZ * segments - z1;
+
+        const h00 = heightmapData[z1 * (segments + 1) + x1] || 0;
+        const h10 = heightmapData[z1 * (segments + 1) + x2] || 0;
+        const h01 = heightmapData[z2 * (segments + 1) + x1] || 0;
+        const h11 = heightmapData[z2 * (segments + 1) + x2] || 0;
+
+        // Interpolate
+        const h0 = h00 * (1 - xFrac) + h10 * xFrac;
+        const h1 = h01 * (1 - xFrac) + h11 * xFrac;
+
+        return h0 * (1 - zFrac) + h1 * zFrac;
+      }
+
       // Cleanup
       return () => {
         scene.remove(terrain);
@@ -314,12 +383,8 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
         skyGeometry.dispose();
         skyMaterial.dispose();
         removeUpdate();
-        
-        // Clean up global terrain function
-        if (typeof window !== 'undefined') {
-          const customWindow = window as WindowWithTerrain;
-          delete customWindow.getTerrainHeight;
-        }
+        // @ts-expect-error - Property 'getTerrainHeight' does not exist on Window interface
+        delete window.getTerrainHeight;
       };
     };
 

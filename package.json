@@ -6,16 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "lint": "next lint"
   },
   "dependencies": {
-    "@react-three/fiber": "^9.1.0",
-    "cannon-es": "^0.20.0",
-    "cannon-es-debugger": "^1.0.0",
-    "framer-motion": "^12.5.0",
     "hammerjs": "^2.0.8",
     "next": "15.2.1",
     "nipplejs": "^0.10.1",
@@ -28,23 +21,14 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.2.0",
-    "@testing-library/user-event": "^14.6.1",
-    "@types/cannon": "^0.1.13",
     "@types/hammerjs": "^2.0.46",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.174.0",
-    "@vitejs/plugin-react": "^4.3.4",
     "eslint": "^9",
     "eslint-config-next": "15.2.1",
-    "eslint-plugin-react": "^7.37.4",
-    "eslint-plugin-react-hooks": "^5.2.0",
-    "jsdom": "^26.0.0",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "vitest": "^3.0.9"
+    "typescript": "^5"
   }
 }
