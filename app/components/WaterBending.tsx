@@ -697,33 +697,118 @@ export default function WaterBending({
           if (bendingParticlesRef.current) {
             const positions = bendingParticlesRef.current.geometry.attributes.position.array as Float32Array;
 
-            for (let i = 0; i < 100; i++) {
-              const i3 = i * 3;
+            // Check if character is close enough to the crosshair position
+            const distanceFromCharacter = characterPositionRef?.current ? 
+              crosshairPositionRef.current.distanceTo(characterPositionRef.current) : Infinity;
+            const characterInRange = distanceFromCharacter < 15; // Only allow collection within 15 units of character
 
-              if (positions[i3 + 1] < -100 && Math.random() < 0.1 && collectedDropsRef.current < MAX_WATER_DROPS) {
-                const angle = Math.random() * Math.PI * 2;
-                const radius = 2 + Math.random() * 4;
-
-                positions[i3] = crosshairPositionRef.current.x + Math.cos(angle) * radius;
-                positions[i3 + 1] = crosshairPositionRef.current.y;
-                positions[i3 + 2] = crosshairPositionRef.current.z + Math.sin(angle) * radius;
-              } else if (positions[i3 + 1] > -100) {
-                const dirX = crosshairPositionRef.current.x - positions[i3];
-                const dirY = crosshairPositionRef.current.y - positions[i3 + 1];
-                const dirZ = crosshairPositionRef.current.z - positions[i3 + 2];
-
-                const length = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
-
-                if (length < 0.5) {
-                  positions[i3 + 1] = -1000;
-                  if (collectedDropsRef.current < MAX_WATER_DROPS) {
-                    collectedDropsRef.current += 1;
+            let nearWaterSource = false;
+            const waterSourceSearchRadius = 10; // Units to search for water around the crosshair
+            
+            // Look for water sources in the scene - detect meshes with water-related names
+            // or water materials (blue/transparent objects)
+            scene.traverse((object) => {
+              if (object instanceof THREE.Mesh) {
+                // Check if object name indicates it's water
+                const isWaterByName = object.name.toLowerCase().includes('water') || 
+                                      object.name.toLowerCase().includes('lake') || 
+                                      object.name.toLowerCase().includes('river');
+                
+                // Check if material indicates it's water (blue and possibly transparent)
+                let isWaterByMaterial = false;
+                if (object.material instanceof THREE.MeshPhysicalMaterial || 
+                    object.material instanceof THREE.MeshStandardMaterial) {
+                  const material = object.material;
+                  // Check for blue-ish color
+                  if (material.color && 
+                      material.color.b > 0.5 && 
+                      material.color.b > material.color.r && 
+                      material.color.b > material.color.g) {
+                    isWaterByMaterial = true;
                   }
-                } else {
-                  positions[i3] += dirX / length * 5 * delta;
-                  positions[i3 + 1] += dirY / length * 5 * delta;
-                  positions[i3 + 2] += dirZ / length * 5 * delta;
                 }
+                
+                // If it appears to be water and is near the crosshair
+                if ((isWaterByName || isWaterByMaterial) && 
+                    object.position.distanceTo(crosshairPositionRef.current) < waterSourceSearchRadius) {
+                  nearWaterSource = true;
+                }
+              }
+              
+              // Also check free water drops as potential sources
+              for (const drop of freeDropsRef.current) {
+                if (drop.mesh.position.distanceTo(crosshairPositionRef.current) < waterSourceSearchRadius) {
+                  nearWaterSource = true;
+                  break;
+                }
+              }
+            });
+            
+            // Add more particles for a better bending effect
+            if (nearWaterSource) {
+              // Update particle positions - only spawn particles when near water
+              for (let i = 0; i < 100; i++) {
+                const i3 = i * 3;
+                
+                if (positions[i3 + 1] < -100 && Math.random() < 0.1) {
+                  // Spawn new particles only when near water
+                  const radius = 3 * Math.random();
+                  const theta = Math.random() * Math.PI * 2;
+                  const phi = Math.random() * Math.PI;
+
+                  // Start particles from character position for better visual effect
+                  const startPos = characterPositionRef?.current ? 
+                    characterPositionRef.current.clone() : 
+                    crosshairPositionRef.current.clone();
+                  startPos.y += 1.5; // Start at character's head level
+
+                  // End position at the crosshair
+                  const targetPos = crosshairPositionRef.current;
+
+                  // Interpolate between start and target based on random progress
+                  const progress = Math.random();
+                  const pos = startPos.clone().lerp(targetPos, progress);
+
+                  // Add some spiral motion
+                  pos.x += Math.sin(theta) * radius * (1 - progress);
+                  pos.y += Math.cos(phi) * radius * (1 - progress) * 0.5;
+                  pos.z += Math.cos(theta) * radius * (1 - progress);
+
+                  positions[i3] = pos.x;
+                  positions[i3 + 1] = pos.y;
+                  positions[i3 + 2] = pos.z;
+                } else if (positions[i3 + 1] > -100) {
+                  // Move existing particles toward the crosshair
+                  const dirX = crosshairPositionRef.current.x - positions[i3];
+                  const dirY = crosshairPositionRef.current.y - positions[i3 + 1];
+                  const dirZ = crosshairPositionRef.current.z - positions[i3 + 2];
+                  const length = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
+                  
+                  if (length < 0.5) {
+                    // Collect water when particles reach the crosshair
+                    positions[i3 + 1] = -1000; // Hide the particle
+                    if (collectedDropsRef.current < MAX_WATER_DROPS) {
+                      collectedDropsRef.current += 1;
+                      if (bendingEffectRef.current) {
+                        const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
+                        material.opacity = 0.8; // Brief bright flash
+                        setTimeout(() => {
+                          if (material) material.opacity = 0.4;
+                        }, 100);
+                      }
+                    }
+                  } else {
+                    // Move particle toward crosshair
+                    positions[i3] += dirX / length * 5 * delta;
+                    positions[i3 + 1] += dirY / length * 5 * delta;
+                    positions[i3 + 2] += dirZ / length * 5 * delta;
+                  }
+                }
+              }
+            } else {
+              // When not near water sources, hide all particles
+              for (let i = 0; i < 100; i++) {
+                positions[i * 3 + 1] = -1000;
               }
             }
 
@@ -858,64 +943,6 @@ export default function WaterBending({
           //   drop.mesh.geometry.dispose();
           //   (drop.mesh.material as THREE.Material).dispose();
           // });
-        }
-
-        // Handle water collection better
-        if (isBendingRef.current &&
-          bendingEffectRef.current &&
-          bendingParticlesRef.current &&
-          crosshairPositionRef.current) {
-
-          // Add more particles for a better bending effect
-          const positions = bendingParticlesRef.current.geometry.attributes.position.array as Float32Array;
-
-          // Update particle positions
-          for (let i = 0; i < 100; i++) {
-            const i3 = i * 3;
-            const radius = 3 * Math.random();
-            const theta = Math.random() * Math.PI * 2;
-            const phi = Math.random() * Math.PI;
-
-            // Start particles from character position for better visual effect
-            const startPos = characterPositionRef?.current ? characterPositionRef.current.clone() : new THREE.Vector3();
-            startPos.y += 1.5; // Start at character's head level
-
-            // End position at the crosshair
-            const targetPos = crosshairPositionRef.current;
-
-            // Interpolate between start and target based on random progress
-            const progress = Math.random();
-            const pos = startPos.clone().lerp(targetPos, progress);
-
-            // Add some spiral motion
-            pos.x += Math.sin(theta) * radius * (1 - progress);
-            pos.y += Math.cos(phi) * radius * (1 - progress) * 0.5;
-            pos.z += Math.cos(theta) * radius * (1 - progress);
-
-            positions[i3] = pos.x;
-            positions[i3 + 1] = pos.y;
-            positions[i3 + 2] = pos.z;
-          }
-
-          bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
-
-          // Improve water collection logic
-          // ENHANCEMENT: Make water collection more predictable and satisfying
-          const collectChance = 0.08; // 8% chance per frame
-          if (Math.random() < collectChance) {
-            if (collectedDropsRef.current < MAX_WATER_DROPS) {
-              collectedDropsRef.current += 1;
-
-              // Add a visual feedback of collection - make the bending effect pulse
-              if (bendingEffectRef.current) {
-                const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
-                material.opacity = 0.8; // Brief bright flash
-                setTimeout(() => {
-                  if (material) material.opacity = 0.4;
-                }, 100);
-              }
-            }
-          }
         }
       };
       updateBendingEffects._id = 'bendingVisualEffects';
