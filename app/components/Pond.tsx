@@ -54,6 +54,11 @@ export default function Pond({
 
       for (let i = 0; i < dropCount; i++) {
         const drop = new THREE.Mesh(dropGeometry, dropMaterial);
+        
+        // Explicitly mark as water for detection
+        drop.name = `pond_water_${i}`;
+        // Add user data to identify as water
+        drop.userData.isWater = true;
 
         // Position the drop within the pond area
         const angle = Math.random() * Math.PI * 2;
@@ -110,9 +115,9 @@ export default function Pond({
             const direction = crosshairPositionRef.current.clone().sub(drops[i].position);
             const distance = direction.length();
 
-            if (distance < 30) { // Increased range for better responsiveness
+            if (distance < 40) { // Increased from 30 to 40 for better range
               direction.normalize();
-              const pullStrength = 15 * (1 - distance / 30); // Stronger pull
+              const pullStrength = 20 * (1 - distance / 40); // Stronger pull (increased from 15)
               velocitiesRef.current[i].add(direction.multiplyScalar(pullStrength * delta));
             }
           }
@@ -222,6 +227,10 @@ export default function Pond({
               drops[i].position.set(x, terrainY + 0.1, z);
               drops[i].scale.set(0.3, 0.3, 0.3); // Start small
               drops[i].visible = true;
+              
+              // Make sure name is properly set when respawning
+              drops[i].name = `pond_water_${i}`;
+              drops[i].userData.isWater = true;
 
               velocitiesRef.current[i].set(
                 (Math.random() - 0.5) * 0.1,

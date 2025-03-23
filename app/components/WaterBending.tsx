@@ -29,6 +29,9 @@ interface WaterSpear {
   _updateId?: string; // ID of the update function for this spear
 }
 
+// Debug flag to show water source detection
+const DEBUG_WATER_SOURCES = false;
+
 export default function WaterBending({
   scene,
   domElement,
@@ -313,9 +316,6 @@ export default function WaterBending({
       };
       
       const findOldestActiveSpear = (): WaterSpear | null => {
-        // Current time to compare against
-        const now = Date.now();
-        
         // Find spears that have creation time stored
         const activeSpears = spearPoolRef.current.filter(spear => spear.inUse);
         if (activeSpears.length === 0) return null;
@@ -450,6 +450,11 @@ export default function WaterBending({
                 ior: 1.33,
               })
             );
+            
+            // Properly name and tag the water drop for detection
+            drop.name = `water_drop_free_${Date.now()}_${i}`;
+            drop.userData.isWater = true; // Explicitly mark as water
+            
             drop.position.copy(position).add(
               new THREE.Vector3(
                 (Math.random() - 0.5) * 2,
@@ -651,6 +656,11 @@ export default function WaterBending({
             cleanedCount++;
           }
         });
+        
+        // Log the cleanup result if debugging is enabled
+        if (DEBUG_WATER_SOURCES && cleanedCount > 0) {
+          console.log(`Cleaned up ${cleanedCount} stale spears that exceeded lifetime limit`);
+        }
       };
 
       updateCrosshairOnTick._id = 'updateCrosshair';
@@ -712,7 +722,11 @@ export default function WaterBending({
                 // Check if object name indicates it's water
                 const isWaterByName = object.name.toLowerCase().includes('water') || 
                                       object.name.toLowerCase().includes('lake') || 
-                                      object.name.toLowerCase().includes('river');
+                                      object.name.toLowerCase().includes('river') ||
+                                      object.name.toLowerCase().includes('pond');
+                
+                // Check if object is explicitly marked as water via userData
+                const isWaterByUserData = object.userData && object.userData.isWater === true;
                 
                 // Check if material indicates it's water (blue and possibly transparent)
                 let isWaterByMaterial = false;
@@ -721,32 +735,29 @@ export default function WaterBending({
                   const material = object.material;
                   // Check for blue-ish color
                   if (material.color && 
-                      material.color.b > 0.5 && 
-                      material.color.b > material.color.r && 
-                      material.color.b > material.color.g) {
+                      material.color.b > 0.6 && // Increased from 0.5 to 0.6 for more accurate detection
+                      material.color.b > material.color.r * 1.5 && // Must be significantly more blue than red
+                      material.color.b > material.color.g * 1.5) { // Must be significantly more blue than green
                     isWaterByMaterial = true;
                   }
                 }
                 
                 // If it appears to be water and is near the crosshair
-                if ((isWaterByName || isWaterByMaterial) && 
+                if ((isWaterByName || isWaterByMaterial || isWaterByUserData) && 
                     object.position.distanceTo(crosshairPositionRef.current) < waterSourceSearchRadius) {
                   nearWaterSource = true;
-                }
-              }
-              
-              // Also check free water drops as potential sources
-              for (const drop of freeDropsRef.current) {
-                if (drop.mesh.position.distanceTo(crosshairPositionRef.current) < waterSourceSearchRadius) {
-                  nearWaterSource = true;
-                  break;
+                  if (DEBUG_WATER_SOURCES) {
+                    console.log('Water source detected:', object.name, 
+                                'Material:', isWaterByMaterial ? 'Water-like' : 'Not water-like',
+                                'UserData:', isWaterByUserData ? 'Marked as water' : 'Not marked',
+                                'Distance:', object.position.distanceTo(crosshairPositionRef.current).toFixed(2));
+                  }
                 }
               }
             });
             
-            // Add more particles for a better bending effect
-            if (nearWaterSource) {
-              // Update particle positions - only spawn particles when near water
+            // Update particle positions - only spawn regular water particles when near water
+            if (nearWaterSource && characterInRange) {
               for (let i = 0; i < 100; i++) {
                 const i3 = i * 3;
                 
@@ -789,6 +800,9 @@ export default function WaterBending({
                     positions[i3 + 1] = -1000; // Hide the particle
                     if (collectedDropsRef.current < MAX_WATER_DROPS) {
                       collectedDropsRef.current += 1;
+                      if (DEBUG_WATER_SOURCES) {
+                        console.log(`Collected water: ${collectedDropsRef.current}/${MAX_WATER_DROPS}`);
+                      }
                       if (bendingEffectRef.current) {
                         const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
                         material.opacity = 0.8; // Brief bright flash
@@ -796,6 +810,8 @@ export default function WaterBending({
                           if (material) material.opacity = 0.4;
                         }, 100);
                       }
+                    } else if (DEBUG_WATER_SOURCES) {
+                      console.log("Water meter full, cannot collect more");
                     }
                   } else {
                     // Move particle toward crosshair
@@ -890,20 +906,58 @@ export default function WaterBending({
           }
         }
 
-        // Handle free water drops (unchanged)
+        // Handle free water drops
         const dropsToRemove: { mesh: THREE.Mesh; velocity: THREE.Vector3 }[] = [];
 
         for (const drop of freeDropsRef.current) {
+          // Always process free water drops when bending is active
           if (isBendingRef.current && crosshairPositionRef.current) {
-            const direction = crosshairPositionRef.current.clone().sub(drop.mesh.position);
-            const distance = direction.length();
-            if (distance < 20) {
-              direction.normalize();
-              const pullStrength = 15 * (1 - distance / 20);
-              drop.velocity.add(direction.multiplyScalar(pullStrength * delta));
+            // Greatly increase the collection range for free water drops (from 15 to 30 units)
+            const characterInRange = characterPositionRef?.current 
+              ? drop.mesh.position.distanceTo(characterPositionRef.current) < 30 
+              : true; // If no character position, don't restrict by distance
+            
+            if (characterInRange) {
+              // Pull the drop towards the crosshair with increased strength
+              const direction = crosshairPositionRef.current.clone().sub(drop.mesh.position);
+              const distance = direction.length();
+              
+              // Increase pull range from 20 to 30 and strengthen the pull effect
+              if (distance < 30) {
+                direction.normalize();
+                const pullStrength = 25 * (1 - distance / 30); // Increased from 15 to 25
+                drop.velocity.add(direction.multiplyScalar(pullStrength * delta));
+              }
+              
+              // Make collection easier by increasing the collection radius
+              if (distance < 1.2) { // Increased from 0.8 to 1.2
+                if (collectedDropsRef.current < MAX_WATER_DROPS) {
+                  collectedDropsRef.current += 1;
+                  if (DEBUG_WATER_SOURCES) {
+                    console.log(`Collected free drop: ${collectedDropsRef.current}/${MAX_WATER_DROPS}`);
+                  }
+                  if (bendingEffectRef.current) {
+                    const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
+                    material.opacity = 0.8; // Brief bright flash
+                    setTimeout(() => {
+                      if (material) material.opacity = 0.4;
+                    }, 100);
+                  }
+                  scene.remove(drop.mesh);
+                  dropsToRemove.push(drop);
+                } else {
+                  // When water meter is full, just remove the drop without collecting
+                  if (DEBUG_WATER_SOURCES) {
+                    console.log("Water meter full, free drop removed without collecting");
+                  }
+                  scene.remove(drop.mesh);
+                  dropsToRemove.push(drop);
+                }
+              }
             }
           }
 
+          // Apply physics to drops regardless of bending state
           drop.mesh.position.add(drop.velocity.clone().multiplyScalar(delta));
           let targetY = 0;
 
@@ -920,19 +974,11 @@ export default function WaterBending({
           if (drop.mesh.position.y > targetY + 0.1) {
             drop.velocity.y -= 9.8 * delta;
           } else {
-            drop.velocity.x *= 0.9;
-            drop.velocity.z *= 0.9;
+            // Reduce friction to make drops slide more along the ground
+            drop.velocity.x *= 0.95; // Changed from 0.9 to 0.95
+            drop.velocity.z *= 0.95; // Changed from 0.9 to 0.95
             drop.velocity.y = 0;
             drop.mesh.position.y = targetY + 0.1;
-          }
-
-          if (isBendingRef.current && crosshairPositionRef.current) {
-            const distance = drop.mesh.position.distanceTo(crosshairPositionRef.current);
-            if (distance < 0.8 && collectedDropsRef.current < MAX_WATER_DROPS) {
-              collectedDropsRef.current += 1;
-              scene.remove(drop.mesh);
-              dropsToRemove.push(drop);
-            }
           }
         }
 
