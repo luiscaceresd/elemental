@@ -25,6 +25,8 @@ interface WaterSpear {
   trailGeometry: THREE.BufferGeometry;
   raycaster: THREE.Raycaster;
   inUse: boolean;
+  creationTime?: number; // When the spear was created/last used
+  _updateId?: string; // ID of the update function for this spear
 }
 
 export default function WaterBending({
@@ -48,7 +50,8 @@ export default function WaterBending({
   const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 450;
   const REQUIRED_DROPS_TO_FIRE = 45;
-  const MAX_VISIBLE_SPHERES = 50;
+  const MAX_VISIBLE_SPHERES = 10;
+  const MAX_SPEAR_LIFETIME_MS = 10000; // Maximum lifetime for a spear
 
   // Add refs for shared water projectile resources
   const spearGeometryRef = useRef<THREE.CylinderGeometry | null>(null);
@@ -61,7 +64,8 @@ export default function WaterBending({
 
   // Add a spear pool for object reuse
   const spearPoolRef = useRef<WaterSpear[]>([]);
-  const SPEAR_POOL_SIZE = 10; // Adjust based on maximum expected simultaneous spears
+  const SPEAR_POOL_SIZE = 50; // Increased from 20 to 50 to prevent pool exhaustion
+  const activeSpearUpdatesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const updateDisplayCount = () => {
@@ -80,26 +84,26 @@ export default function WaterBending({
       raycasterRef.current = new THREE.Raycaster();
 
       // Initialize shared resources for water projectile
-      spearGeometryRef.current = new THREE.CylinderGeometry(0.4, 0.1, 3.5, 16);
+      spearGeometryRef.current = new THREE.CylinderGeometry(1.2, 0.4, 6.0, 16);
       spearMaterialRef.current = new THREE.MeshPhysicalMaterial({
-        color: 0x00BFFF,
-        transparent: true,
-        opacity: 0.9,
-        roughness: 0.1,
-        metalness: 0.2,
+        color: 0x00FFFF, // Brighter cyan
+        transparent: false, // Remove transparency
+        opacity: 1.0,
+        roughness: 0,
+        metalness: 0.5,
         clearcoat: 1.0,
         clearcoatRoughness: 0.1,
-        transmission: 0.8,
+        transmission: 0, // Remove transmission to make fully visible
         ior: 1.33,
-        emissive: 0x0077BB,
-        emissiveIntensity: 0.5
+        emissive: 0x00FFFF, // Match emissive to color
+        emissiveIntensity: 2.0 // Much stronger glow
       });
 
-      glowGeometryRef.current = new THREE.CylinderGeometry(0.6, 0.3, 4.0, 16);
+      glowGeometryRef.current = new THREE.CylinderGeometry(1.5, 0.6, 6.5, 16);
       glowMaterialRef.current = new THREE.MeshBasicMaterial({
-        color: 0x00BFFF,
+        color: 0xFFFFFF, // White glow
         transparent: true,
-        opacity: 0.3,
+        opacity: 0.8, // Stronger glow
         side: THREE.BackSide,
       });
 
@@ -125,42 +129,58 @@ export default function WaterBending({
       });
 
       // Initialize the spear pool
-      for (let i = 0; i < SPEAR_POOL_SIZE; i++) {
-        // Create spear group with spear and glow meshes
-        const spearGroup = new THREE.Group();
+      if (spearPoolRef.current.length === 0) {
+        for (let i = 0; i < SPEAR_POOL_SIZE; i++) {
+          // Create spear group with spear and glow meshes
+          const spearGroup = new THREE.Group();
 
-        // Create spear mesh using shared geometry and material
-        const spear = new THREE.Mesh(spearGeometryRef.current, spearMaterialRef.current);
-        spear.castShadow = true;
-        spearGroup.add(spear);
+          // Create spear mesh using shared geometry and material
+          const spear = new THREE.Mesh(spearGeometryRef.current, spearMaterialRef.current);
+          spear.castShadow = true;
+          spearGroup.add(spear);
 
-        // Create glow mesh using shared geometry and material
-        const glow = new THREE.Mesh(glowGeometryRef.current, glowMaterialRef.current);
-        spearGroup.add(glow);
+          // Create glow mesh using shared geometry and material
+          const glow = new THREE.Mesh(glowGeometryRef.current, glowMaterialRef.current);
+          spearGroup.add(glow);
+          
+          // Add a debug sphere to make the spear's position more obvious
+          const debugSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(1.0, 16, 16),
+            new THREE.MeshBasicMaterial({ color: 0xFF0000, transparent: true, opacity: 0.8 })
+          );
+          spearGroup.add(debugSphere);
 
-        // Create trail with unique geometry but shared material
-        const trailGeometry = new THREE.BufferGeometry();
-        const trailParticles = 30;
-        const trailPositions = new Float32Array(trailParticles * 3);
+          // Create trail with unique geometry but shared material
+          const trailGeometry = new THREE.BufferGeometry();
+          const trailParticles = 30;
+          const trailPositions = new Float32Array(trailParticles * 3);
 
-        // Initialize positions to be far away (they'll be reset when used)
-        for (let j = 0; j < trailParticles; j++) {
-          const j3 = j * 3;
-          trailPositions[j3] = 0;
-          trailPositions[j3 + 1] = -1000; // Hidden position
-          trailPositions[j3 + 2] = 0;
+          // Initialize positions to be far away (they'll be reset when used)
+          for (let j = 0; j < trailParticles; j++) {
+            const j3 = j * 3;
+            trailPositions[j3] = 0;
+            trailPositions[j3 + 1] = -1000; // Hidden position
+            trailPositions[j3 + 2] = 0;
+          }
+
+          trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
+          const trail = new THREE.Points(trailGeometry, trailMaterialRef.current);
+
+          // Add to pool (not to scene yet - will be added when used)
+          spearPoolRef.current.push({
+            spearGroup,
+            trail,
+            trailGeometry,
+            raycaster: new THREE.Raycaster(),
+            inUse: false,
+            creationTime: Date.now() // Set initial creation time
+          });
         }
-
-        trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
-        const trail = new THREE.Points(trailGeometry, trailMaterialRef.current);
-
-        // Add to pool (not to scene yet - will be added when used)
-        spearPoolRef.current.push({
-          spearGroup,
-          trail,
-          trailGeometry,
-          raycaster: new THREE.Raycaster(),
-          inUse: false
+      } else {
+        // Ensure all spears are marked as not in use to prevent leaks after hot reloads
+        spearPoolRef.current.forEach(spear => {
+          spear.inUse = false;
+          spear._updateId = undefined;
         });
       }
 
@@ -229,33 +249,132 @@ export default function WaterBending({
       };
 
       const getSpearFromPool = (): WaterSpear | null => {
-        // Find an available spear in the pool
+        // First try to find any spears marked as inUse but with no active update
+        const potentiallyLeakedSpears = spearPoolRef.current.filter(spear => 
+          spear.inUse && 
+          spear._updateId && 
+          !activeSpearUpdatesRef.current.has(spear._updateId)
+        );
+        
+        if (potentiallyLeakedSpears.length > 0) {
+          // Return the first leaked spear to the pool
+          returnSpearToPool(potentiallyLeakedSpears[0]);
+        }
+        
+        // Then look for a spear not in use
         const availableSpear = spearPoolRef.current.find(spear => !spear.inUse);
 
         if (availableSpear) {
           availableSpear.inUse = true;
+          availableSpear.creationTime = Date.now(); // Track when this spear was allocated
           return availableSpear;
         }
+        
+        // If no available spear, attempt force cleanup of any spears that might be stuck
+        // This is a safety measure to prevent pool exhaustion
+        const oldestActiveSpear = findOldestActiveSpear();
+        if (oldestActiveSpear) {
+          returnSpearToPool(oldestActiveSpear);
+          
+          // Now try to get a spear again
+          const recycledSpear = spearPoolRef.current.find(spear => !spear.inUse);
+          if (recycledSpear) {
+            recycledSpear.inUse = true;
+            recycledSpear.creationTime = Date.now();
+            return recycledSpear;
+          }
+        }
 
-        // No spears available in the pool
-        console.warn('Water spear pool exhausted. Consider increasing pool size.');
+        // If all else fails, force-cleanup all spears
+        console.warn('Emergency cleanup of all spears due to pool exhaustion');
+        forceCleanupAllSpears();
+        
+        // Try one more time
+        const emergencySpear = spearPoolRef.current.find(spear => !spear.inUse);
+        if (emergencySpear) {
+          emergencySpear.inUse = true;
+          emergencySpear.creationTime = Date.now();
+          return emergencySpear;
+        }
+
+        // No spears available in the pool even after force cleanup
+        console.warn('Water spear pool exhausted - could not recover any spears');
+        
+        // Last resort: Try to find any spear in the pool and force it to be available
+        if (spearPoolRef.current.length > 0) {
+          const forcedSpear = spearPoolRef.current[0];
+          forcedSpear.inUse = false; // Force it to be available
+          forcedSpear.inUse = true;  // Then mark it as in use
+          forcedSpear.creationTime = Date.now();
+          return forcedSpear;
+        }
+        
         return null;
+      };
+      
+      const findOldestActiveSpear = (): WaterSpear | null => {
+        // Current time to compare against
+        const now = Date.now();
+        
+        // Find spears that have creation time stored
+        const activeSpears = spearPoolRef.current.filter(spear => spear.inUse);
+        if (activeSpears.length === 0) return null;
+        
+        // Find oldest spear based on creation time
+        return activeSpears.reduce((oldest, current) => {
+          // If current has no creation time, it's considered older
+          if (!current.creationTime) return current;
+          
+          // If oldest has no creation time, current is newer
+          if (!oldest.creationTime) return current;
+          
+          // Compare creation times
+          return current.creationTime < oldest.creationTime ? current : oldest;
+        }, activeSpears[0]);
       };
 
       const returnSpearToPool = (spear: WaterSpear) => {
-        // Remove from scene
-        scene.remove(spear.spearGroup);
-        scene.remove(spear.trail);
+        // Verify the spear exists and is from this pool
+        if (!spear || !spearPoolRef.current.includes(spear)) {
+          console.error('Attempting to return an invalid spear to the pool');
+          return;
+        }
+        
+        // If the spear is not marked as in use, it's already in the pool
+        if (!spear.inUse) {
+          console.warn('Spear is already in the pool');
+          return;
+        }
+        
+        // Remove from scene - use try/catch to handle potential errors
+        try {
+          scene.remove(spear.spearGroup);
+          scene.remove(spear.trail);
+        } catch (e) {
+          console.error('Error removing spear from scene:', e);
+          // Continue with cleanup even if scene removal fails
+        }
 
         // Reset trail positions to hidden
-        const positions = spear.trail.geometry.attributes.position.array as Float32Array;
-        for (let i = 0; i < positions.length / 3; i++) {
-          positions[i * 3 + 1] = -1000; // Hide trail points
+        try {
+          const positions = spear.trailGeometry.attributes.position.array as Float32Array;
+          for (let i = 0; i < positions.length / 3; i++) {
+            positions[i * 3 + 1] = -1000; // Hide trail points
+          }
+          spear.trailGeometry.attributes.position.needsUpdate = true;
+        } catch (e) {
+          console.error('Error resetting trail positions:', e);
+          // Continue with cleanup even if trail reset fails
         }
-        spear.trail.geometry.attributes.position.needsUpdate = true;
 
-        // Mark as available for reuse
+        // If this spear has an update ID, clean it up from the active updates set
+        if (spear._updateId && activeSpearUpdatesRef.current.has(spear._updateId)) {
+          activeSpearUpdatesRef.current.delete(spear._updateId);
+        }
+
+        // Mark as available for reuse and clear updateId
         spear.inUse = false;
+        spear._updateId = undefined;
       };
 
       const createWaterSpear = () => {
@@ -263,43 +382,56 @@ export default function WaterBending({
 
         if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) {
           // Not enough water to create a spear
+          console.log(`Not enough water to create spear. Current: ${collectedDropsRef.current}, Required: ${REQUIRED_DROPS_TO_FIRE}`);
           return;
         }
 
         // Creating water spear
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
+        console.log(`Creating water spear! Remaining water: ${collectedDropsRef.current}`);
 
         // Get a spear from the pool
         const pooledSpear = getSpearFromPool();
-        if (!pooledSpear) return; // No spears available
+        if (!pooledSpear) {
+          console.log('Failed to get spear from pool!');
+          return; // No spears available
+        }
+        console.log('Successfully created a water spear from pool');
 
-        const { spearGroup, trail, raycaster } = pooledSpear;
+        const { spearGroup, raycaster } = pooledSpear;
 
         // Position and orient the spear
         spearGroup.position.copy(characterPositionRef.current);
-        spearGroup.position.y += 1.5;
+        spearGroup.position.y += 1.5; // Head level
 
         const direction = new THREE.Vector3();
         camera.getWorldDirection(direction);
         direction.normalize();
+        
+        // Position the spear in front of the character
+        spearGroup.position.add(direction.clone().multiplyScalar(2)); // Start 2 units in front
+        
+        // Log the starting position and direction
+        console.log(`Spear start position: x=${spearGroup.position.x.toFixed(2)}, y=${spearGroup.position.y.toFixed(2)}, z=${spearGroup.position.z.toFixed(2)}`);
+        console.log(`Spear direction: x=${direction.x.toFixed(2)}, y=${direction.y.toFixed(2)}, z=${direction.z.toFixed(2)}`);
 
         const up = new THREE.Vector3(0, 1, 0);
         const quaternion = new THREE.Quaternion().setFromUnitVectors(up, direction);
-        spearGroup.setRotationFromQuaternion(quaternion);
+        spearGroup.quaternion.copy(quaternion);
 
         // Add to scene
         scene.add(spearGroup);
-        scene.add(trail);
+        scene.add(pooledSpear.trail);
 
         // Reset trail to spear position
         const trailParticles = 30; // Same value used when creating the pool
-        const positions = trail.geometry.attributes.position.array as Float32Array;
+        const positions = pooledSpear.trailGeometry.attributes.position.array as Float32Array;
         for (let i = 0; i < trailParticles; i++) {
           positions[i * 3] = spearGroup.position.x;
           positions[i * 3 + 1] = spearGroup.position.y;
           positions[i * 3 + 2] = spearGroup.position.z;
         }
-        trail.geometry.attributes.position.needsUpdate = true;
+        pooledSpear.trailGeometry.attributes.position.needsUpdate = true;
 
         const createWaterDrops = (position: THREE.Vector3) => {
           for (let i = 0; i < 10; i++) {
@@ -339,16 +471,32 @@ export default function WaterBending({
           }
         };
 
-        const speed = 30;
-        const maxLifetime = 5000;
+        const speed = 15; // Slowed down speed (was 30)
+        const maxLifetime = 10000; // Doubled lifetime (was 5000)
         const creationTime = Date.now();
 
         const updateSpear: IdentifiableFunction = (delta: number) => {
+          // Debug log every second
+          if (Math.floor(Date.now() / 1000) % 3 === 0) {
+            console.log(`Spear position: x=${spearGroup.position.x.toFixed(2)}, y=${spearGroup.position.y.toFixed(2)}, z=${spearGroup.position.z.toFixed(2)}`);
+          }
+
           if (Date.now() - creationTime > maxLifetime) {
             // Lifetime expired, return to pool
             returnSpearToPool(pooledSpear);
             removeSpearUpdate();
             return;
+          }
+
+          // Check if spear is too far from character (out of bounds)
+          if (characterPositionRef?.current) {
+            const distanceFromCharacter = spearGroup.position.distanceTo(characterPositionRef.current);
+            if (distanceFromCharacter > 100) {
+              console.log('Spear went out of bounds, returning to pool');
+              returnSpearToPool(pooledSpear);
+              removeSpearUpdate();
+              return;
+            }
           }
 
           const terrain = scene.getObjectByName('terrain');
@@ -367,7 +515,7 @@ export default function WaterBending({
 
           spearGroup.position.add(direction.clone().multiplyScalar(speed * delta));
 
-          const positions = trail.geometry.attributes.position.array as Float32Array;
+          const positions = pooledSpear.trailGeometry.attributes.position.array as Float32Array;
 
           for (let i = trailParticles - 1; i > 0; i--) {
             const i3 = i * 3;
@@ -381,13 +529,28 @@ export default function WaterBending({
           positions[1] = spearGroup.position.y;
           positions[2] = spearGroup.position.z;
 
-          trail.geometry.attributes.position.needsUpdate = true;
+          pooledSpear.trailGeometry.attributes.position.needsUpdate = true;
 
-          spearGroup.rotateZ(delta * 2);
+          spearGroup.quaternion.copy(quaternion);
         };
 
-        updateSpear._id = `waterSpear_${Date.now()}`;
-        const removeSpearUpdate = registerUpdate(updateSpear);
+        const updateId = `waterSpear_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        updateSpear._id = updateId;
+        pooledSpear._updateId = updateId; // Store the update ID in the spear object
+        activeSpearUpdatesRef.current.add(updateId);
+        
+        // Store the remove function from registerUpdate
+        const removeFunc = registerUpdate(updateSpear);
+        const updateIdCopy = updateId; // Make a copy to avoid race conditions
+        const removeSpearUpdate = () => {
+          activeSpearUpdatesRef.current.delete(updateIdCopy);
+          removeFunc();
+          
+          // Double-check the spear is actually returned to the pool
+          if (pooledSpear.inUse) {
+            returnSpearToPool(pooledSpear);
+          }
+        };
       };
 
       const onMouseDown = (event: MouseEvent) => {
@@ -405,17 +568,91 @@ export default function WaterBending({
 
       const onRightClick = (event: MouseEvent) => {
         if (event.button === 2) {
+          console.log('Right-click detected - attempting to create water spear');
           event.preventDefault();
           if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
             createWaterSpear();
+          } else {
+            console.log(`Not enough water for spear: ${collectedDropsRef.current}/${REQUIRED_DROPS_TO_FIRE}`);
           }
         }
+      };
+
+      const getActiveSpearCount = (): number => {
+        return spearPoolRef.current.filter(spear => spear.inUse).length;
       };
 
       const updateCrosshairOnTick: IdentifiableFunction = (delta: number) => {
         if (delta) { /* ensure delta is used */ }
         updateCrosshairPosition();
+        
+        // Check if we have inconsistency between tracking sets
+        const activeSpears = getActiveSpearCount();
+        const activeUpdates = activeSpearUpdatesRef.current.size;
+        
+        // If we have more active spears than updates, force cleanup on each frame
+        if (activeSpears > activeUpdates) {
+          console.log(`MISMATCH DETECTED: ${activeSpears} spears but only ${activeUpdates} updates`);
+          forceCleanupAllSpears();
+        }
+        
+        // Periodically clean up stale spears (every ~3 seconds)
+        const now = Date.now();
+        if (now % 3000 < 16) { // Will trigger roughly once every 3 seconds assuming 60fps
+          cleanupStaleSpears();
+        }
       };
+      
+      const forceCleanupAllSpears = () => {
+        // Get all active spears
+        const activeSpears = spearPoolRef.current.filter(spear => spear.inUse);
+        
+        // Force return them all to the pool
+        activeSpears.forEach(spear => {
+          returnSpearToPool(spear);
+        });
+        
+        // Double-check that the cleanup worked
+        const stillActiveCount = spearPoolRef.current.filter(s => s.inUse).length;
+        if (stillActiveCount > 0) {
+          // Force reset the inUse flag on all spears as a last resort
+          spearPoolRef.current.forEach(spear => {
+            if (spear.inUse) {
+              try {
+                // Attempt to remove from scene if needed
+                scene.remove(spear.spearGroup);
+                scene.remove(spear.trail);
+              } catch (e) {
+                console.error('Error removing spear during emergency cleanup:', e);
+              }
+              spear.inUse = false;
+              spear._updateId = undefined;
+            }
+          });
+        }
+        
+        // Clear any orphaned update IDs from the set
+        const activeSpearIds = new Set(spearPoolRef.current.filter(s => s.inUse).map(s => s._updateId).filter(Boolean));
+        const orphanedUpdateIds = Array.from(activeSpearUpdatesRef.current).filter(id => !activeSpearIds.has(id));
+        
+        if (orphanedUpdateIds.length > 0) {
+          orphanedUpdateIds.forEach(id => activeSpearUpdatesRef.current.delete(id));
+        }
+      };
+      
+      const cleanupStaleSpears = () => {
+        const now = Date.now();
+        let cleanedCount = 0;
+        
+        spearPoolRef.current.forEach(spear => {
+          // If spear is in use and has a creation time that's older than MAX_SPEAR_LIFETIME_MS
+          if (spear.inUse && spear.creationTime && (now - spear.creationTime) > MAX_SPEAR_LIFETIME_MS) {
+            returnSpearToPool(spear);
+            cleanedCount++;
+          }
+        });
+      };
+
       updateCrosshairOnTick._id = 'updateCrosshair';
       const removeUpdateCrosshair = registerUpdate(updateCrosshairOnTick);
 
@@ -437,8 +674,11 @@ export default function WaterBending({
       });
 
       hammer.on('tap', () => {
+        console.log('Tap detected - attempting to create water spear');
         if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
           createWaterSpear();
+        } else {
+          console.log(`Not enough water for spear: ${collectedDropsRef.current}/${REQUIRED_DROPS_TO_FIRE}`);
         }
       });
 
@@ -703,13 +943,20 @@ export default function WaterBending({
         // Cleanup spear pool
         spearPoolRef.current.forEach(spear => {
           if (spear.inUse) {
+            console.log('Cleaning up spear that was still in use');
             scene.remove(spear.spearGroup);
             scene.remove(spear.trail);
+            spear.inUse = false; // Mark as not in use to prevent memory leaks
           }
           // Dispose of the unique geometry (trail geometry)
           spear.trailGeometry.dispose();
         });
-        spearPoolRef.current = [];
+        // Don't completely clear the pool to prevent race conditions
+        // Instead mark all spears as not in use
+        spearPoolRef.current.forEach(spear => {
+          spear.inUse = false;
+          spear._updateId = undefined;
+        });
 
         // Dispose shared water projectile resources
         spearGeometryRef.current?.dispose();

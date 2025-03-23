@@ -1,3 +1,8 @@
+---
+description: Guidelines for implementing Studio Ghibli inspired art style in the Elemental game
+glob: "**/*.{tsx,ts,js,jsx}"
+---
+
 # Studio Ghibli Art Style for Your Game
 
 ## Description
@@ -44,5 +49,5 @@ This rule ensures that the visual design of your game reflects the whimsical, na
 
 ## Reference Files
 - `@components/Character.tsx`: Ensure character models and animations align with the described style.
-- `@components/Environment.tsx`: Apply environment design guidelines here (create this file if it doesn’t exist).
+- `@components/Environment.tsx`: Apply environment design guidelines here (create this file if it doesn't exist).
 - `@components/GameCanvas.tsx`: Use this as the central component to enforce the art style across the scene.
