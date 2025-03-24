@@ -9,6 +9,7 @@ import MobileControls from './MobileControls';
 import World from './World';
 import Pond from './Pond';
 import Crosshair from './Crosshair';
+import * as CANNON from 'cannon';
 
 // Add a type for functions with an identifier
 type IdentifiableFunction = ((delta: number) => void) & {
@@ -30,6 +31,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.Camera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const worldRef = useRef<CANNON.World | null>(null);
   const keysRef = useRef<{
     w: boolean;
     a: boolean;
@@ -78,6 +80,15 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       // Create scene, camera, and renderer
       const scene = new THREE.Scene();
       sceneRef.current = scene;
+
+      // Initialize Cannon.js physics world
+      const world = new CANNON.World();
+      world.gravity.set(0, -9.82, 0); // Earth-like gravity
+      world.broadphase = new CANNON.NaiveBroadphase(); // Simple collision detection
+      world.solver.iterations = 10; // Improve solver accuracy
+      world.defaultContactMaterial.contactEquationStiffness = 1e7; // Increase stiffness to prevent sinking
+      world.defaultContactMaterial.contactEquationRelaxation = 3; // Better stability
+      worldRef.current = world;
 
       const camera = new THREE.PerspectiveCamera(
         75, // Field of view
@@ -148,6 +159,11 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         // Map WASD and Space to our controls
         if (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === ' ') {
           keysRef.current[key as keyof typeof keysRef.current] = true;
+          
+          // Remove debug space key log
+          if (key === ' ') {
+            // Removed console.log
+          }
         }
       };
 
@@ -177,6 +193,13 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       const animate = () => {
         requestAnimationFrame(animate);
         const delta = clock.getDelta();
+
+        // Step the physics world forward with substeps for stability
+        if (worldRef.current && gameState === 'playing') {
+          const maxSubSteps = 5; // More substeps for better stability
+          const fixedTimeStep = 1/120; // Smaller timestep for more precision
+          worldRef.current.step(fixedTimeStep, delta, maxSubSteps);
+        }
 
         // Run all registered update functions
         updateFunctionsRef.current.forEach(update => update(delta));
@@ -209,7 +232,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         if (cleanupFn) cleanupFn();
       });
     };
-  }, []);
+  }, [gameState]);
 
   // Function to register update functions from child components - this is memoized
   const registerUpdate = useCallback((updateFn: IdentifiableFunction) => {
@@ -261,7 +284,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       {/* Replace static crosshair with dynamic component */}
       <Crosshair />
 
-      {sceneReady && sceneRef.current && rendererRef.current && cameraRef.current && characterPositionRef.current && (
+      {sceneReady && sceneRef.current && rendererRef.current && cameraRef.current && characterPositionRef.current && worldRef.current && (
         <>
           {/* Add the World component for Ghibli-style environment */}
           <World
@@ -269,6 +292,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             isBendingRef={isBendingRef}
             crosshairPositionRef={crosshairPositionRef}
             registerUpdate={registerUpdate}
+            world={worldRef.current}
           />
 
           {/* Add pond directly (not needed if already added in World) */}
@@ -280,6 +304,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             isBendingRef={isBendingRef}
             crosshairPositionRef={crosshairPositionRef}
             registerUpdate={registerUpdate}
+            world={worldRef.current}
           />
 
           <CharacterController
@@ -288,6 +313,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             registerUpdate={registerUpdate}
             camera={cameraRef.current}
             onPositionUpdate={handleCharacterPositionUpdate}
+            world={worldRef.current}
           />
 
           <CameraController
@@ -309,6 +335,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             isBendingRef={isBendingRef}
             crosshairPositionRef={crosshairPositionRef}
             characterPositionRef={characterPositionRef}
+            world={worldRef.current}
           />
 
           {/* Show mobile controls only on mobile devices when game is playing */}

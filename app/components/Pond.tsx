@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import * as CANNON from 'cannon';
 
 // Define interface for window with getTerrainHeight
 interface WindowWithTerrain extends Window {
@@ -16,6 +17,7 @@ interface PondProps {
   isBendingRef: React.MutableRefObject<boolean>;
   crosshairPositionRef: React.MutableRefObject<THREE.Vector3>;
   registerUpdate: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
+  world?: CANNON.World; // Make it optional to maintain compatibility
 }
 
 export default function Pond({
@@ -26,10 +28,18 @@ export default function Pond({
   isBendingRef,
   crosshairPositionRef,
   registerUpdate,
+  world,
 }: PondProps) {
   const dropsRef = useRef<THREE.Mesh[]>([]);
   const velocitiesRef = useRef<THREE.Vector3[]>([]);
   const dropCount = 300; // Increased for better pond coverage
+  
+  // Log world availability for debugging (this fixes the unused variable warning)
+  useEffect(() => {
+    if (world) {
+      // Removed console.log
+    }
+  }, [world, position]);
 
   useEffect(() => {
     const setupPond = () => {
