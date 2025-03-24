@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import * as CANNON from 'cannon';
 import Character from './Character';
 
 type IdentifiableFunction = ((delta: number) => void) & {
@@ -20,6 +21,7 @@ interface CharacterControllerProps {
   registerUpdate: (updateFn: IdentifiableFunction) => () => void;
   camera: THREE.Camera;
   onPositionUpdate?: (position: THREE.Vector3) => void;
+  world: CANNON.World; // Add Cannon.js world
 }
 
 export default function CharacterController({
@@ -27,13 +29,22 @@ export default function CharacterController({
   keysRef,
   registerUpdate,
   camera,
-  onPositionUpdate
+  onPositionUpdate,
+  world
 }: CharacterControllerProps) {
   const characterRef = useRef<THREE.Group | null>(null);
   const velocityRef = useRef<THREE.Vector3 | null>(null);
   const onGroundRef = useRef(true);
+  // Create a ref to store character position for external components to access
   const characterPositionRef = useRef<THREE.Vector3 | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const lastTerrainHeightRef = useRef<number>(0);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const movingRef = useRef<boolean>(false);
+  // Add Cannon.js body reference
+  const characterBodyRef = useRef<CANNON.Body | null>(null);
+  // Track last ground state for debugging
+  const lastGroundStateRef = useRef<boolean>(true);
 
   // This useEffect is necessary for THREE.js integration and physics
   useEffect(() => {
@@ -51,27 +62,191 @@ export default function CharacterController({
         scene.remove(existingCollider);
       }
 
-      // Character is now loaded via the Character component
-      // The physics collider is still needed, but can be invisible
-      const colliderGeometry = new THREE.SphereGeometry(1, 16, 16);
-      const colliderMaterial = new THREE.MeshBasicMaterial({
-        visible: false  // Make it invisible
+      // Create a Cannon.js body for the character
+      const characterShape = new CANNON.Sphere(1); // Matches the size of the previous collider
+      const characterBody = new CANNON.Body({
+        mass: 5, // Character has mass (dynamic object)
+        shape: characterShape,
+        position: new CANNON.Vec3(0, 3, 5), // Initial position - start a bit higher to ensure it doesn't spawn inside the ground
+        material: new CANNON.Material("characterMaterial"),
+        linearDamping: 0, // No damping for frictionless movement
+        angularDamping: 0.99, // Prevent excessive rotation
+        fixedRotation: true, // Prevent character from rotating when moving
+        allowSleep: false, // Prevent the body from sleeping to ensure continuous updates
+        sleepSpeedLimit: 1000, // Set an extremely high sleep speed limit
+        collisionFilterGroup: 1, // Character collision group
+        collisionFilterMask: 1 // Character collides with group 1 (which includes the ground)
       });
+      
+      // Increase collision detection accuracy
+      characterBody.collisionResponse = true; // Full collision response
+      
+      // Prevent the body from sleeping explicitly
+      characterBody.wakeUp();
+      
+      // Add the body to the physics world
+      world.addBody(characterBody);
+      characterBodyRef.current = characterBody;
 
-      const collider = new THREE.Mesh(colliderGeometry, colliderMaterial);
-      collider.position.copy(characterPositionRef.current);
-      collider.visible = false;
-      collider.name = 'characterCollider';
-      scene.add(collider);
+      // Create a contact material for character-ground interaction
+      const groundMaterial = new CANNON.Material("groundMaterial");
+      const characterGroundContact = new CANNON.ContactMaterial(
+        groundMaterial,
+        characterBody.material,
+        {
+          friction: 0, // No friction for debugging
+          restitution: 0.1, // Reduced bounce
+          contactEquationStiffness: 1e8, // Increase to prevent sinking
+          contactEquationRelaxation: 3 // Adjusted for better stability
+        }
+      );
+      world.addContactMaterial(characterGroundContact);
 
-      // Physics constants
-      // The following constants are commented out because they're not currently used,
-      // but may be needed for future physics enhancements
-      // const moveSpeed = 30;
-      // const jumpForce = 15;
-      // const gravity = 30;
-      const friction = 0.9;
-      // const rotationSpeed = 0.1; // How fast character rotates to face movement direction
+      // Ground detection using collision events
+      characterBody.addEventListener('collide', (
+        _event: { type: string; body: CANNON.Body; contact: CANNON.ContactEquation; }
+      ) => {
+        // Check if collision is with the ground (could check material or position)
+        const contact = _event.contact;
+        
+        // If contact normal points upward, we're on the ground (lowered threshold)
+        if (contact.ni.y > 0.2) { // Reduced threshold from 0.5 to 0.2
+          onGroundRef.current = true;
+        }
+      });
+      
+      // Explicitly set initial ground state to true since we start on the ground
+      onGroundRef.current = true;
+
+      // Physics constants - removing unused friction variable
+      
+      // Define the update function for physics-based movement
+      const update: IdentifiableFunction = (delta: number) => {
+        if (!characterBodyRef.current || !characterPositionRef.current) return;
+
+        // Ensure the character body is awake every frame
+        characterBodyRef.current.wakeUp();
+
+        // Alternative ground detection: check if character is close to y=0 (ground plane)
+        // This handles cases where collision detection might not work perfectly
+        const characterHeight = characterBodyRef.current.position.y;
+        const characterRadius = 1; // Same as the sphere radius
+        const groundThreshold = characterRadius + 0.1; // Small buffer
+        
+        if (characterHeight <= groundThreshold) {
+          // We are definitely on the ground if we're very close to y=0
+          onGroundRef.current = true;
+          
+          // If character is too close to ground, push it up slightly to prevent sinking
+          if (characterHeight < characterRadius * 0.9) {
+            characterBodyRef.current.position.y = characterRadius;
+          }
+        }
+        
+        // Debug ground state when it changes
+        if (lastGroundStateRef.current !== onGroundRef.current) {
+          // Removed console.log
+          lastGroundStateRef.current = onGroundRef.current;
+        }
+
+        // Convert the keysRef to the expected type for typescript
+        const keys = keysRef as React.MutableRefObject<{
+          w: boolean;
+          a: boolean;
+          s: boolean;
+          d: boolean;
+          ' ': boolean;
+        }>;
+
+        // Debug movement - only when keys are pressed
+        const isMoving = keys.current.w || keys.current.a || keys.current.s || keys.current.d;
+        if (isMoving && Math.floor(Date.now() / 500) % 2 === 0) {
+          // Removed console.log
+        }
+
+        // Get camera direction for movement relative to camera
+        const cameraDirection = new THREE.Vector3();
+        camera.getWorldDirection(cameraDirection);
+        cameraDirection.y = 0; // Keep movement on the x-z plane
+        cameraDirection.normalize();
+
+        // Create a vector perpendicular to camera direction for strafing
+        const cameraSide = new THREE.Vector3(-cameraDirection.z, 0, cameraDirection.x);
+
+        // Calculate the desired movement direction based on keys
+        const moveDirection = new THREE.Vector3(0, 0, 0);
+        if (keys.current.w) moveDirection.add(cameraDirection);
+        if (keys.current.s) moveDirection.sub(cameraDirection);
+        if (keys.current.a) moveDirection.sub(cameraSide);
+        if (keys.current.d) moveDirection.add(cameraSide);
+
+        // Only normalize if we have some movement
+        if (moveDirection.lengthSq() > 0) {
+          moveDirection.normalize();
+
+          // Calculate target rotation based on movement direction
+          const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
+
+          // Apply rotation to the model
+          if (characterRef.current) {
+            const currentRotation = characterRef.current.rotation.y;
+            const newRotation = lerpAngle(currentRotation, targetRotation, 10 * delta);
+            characterRef.current.rotation.y = newRotation;
+          }
+
+          // Apply movement using direct velocity control
+          // Set horizontal velocity directly for precise control
+          const speed = 25; // Increased speed from 15 to 25 for faster movement
+          characterBodyRef.current.velocity.x = moveDirection.x * speed;
+          characterBodyRef.current.velocity.z = moveDirection.z * speed;
+          // Leave the y velocity unchanged to preserve gravity/jumping
+          
+          // Debug movement was moved to a periodic check above to avoid spam
+        } else {
+          // Stop horizontal movement when no keys are pressed
+          characterBodyRef.current.velocity.x = 0;
+          characterBodyRef.current.velocity.z = 0;
+        }
+
+        // Jump if space is pressed and character is on the ground
+        if (keys.current[' '] && onGroundRef.current) {
+          characterBodyRef.current.velocity.y = 6; // Reduced from 10 to 6
+          onGroundRef.current = false; // Immediately set ground state to false
+          
+          // Add a small upward impulse for more responsive jumping
+          characterBodyRef.current.applyImpulse(
+            new CANNON.Vec3(0, 25, 0), // Reduced from 50 to 25
+            characterBodyRef.current.position // Apply at center of mass
+          );
+          
+          // Removed console.log
+        }
+        
+        // Reset ground state when falling
+        if (characterBodyRef.current.velocity.y < -1) {
+          onGroundRef.current = false;
+        }
+
+        // Get the character position from the physics body
+        const bodyPosition = characterBodyRef.current.position;
+        characterPositionRef.current.set(
+          bodyPosition.x,
+          bodyPosition.y,
+          bodyPosition.z
+        );
+
+        // Update the character model position
+        if (characterRef.current) {
+          characterRef.current.position.copy(characterPositionRef.current);
+          characterRef.current.position.y -= 0.5; // Lower it slightly for visual alignment
+          characterRef.current.visible = true;
+        }
+
+        // Call the position update callback if it exists
+        if (onPositionUpdate) {
+          onPositionUpdate(characterPositionRef.current);
+        }
+      };
 
       // Helper to normalize angle between -PI and PI
       const normalizeAngle = (angle: number): number => {
@@ -87,146 +262,6 @@ export default function CharacterController({
         return start + diff * t;
       };
 
-      // Helper to get terrain height using both methods
-      const getTerrainHeight = (x: number, z: number): number => {
-        // This function will look for a globally defined getTerrainHeight function
-        // that should be set by the world component
-
-        interface WindowWithTerrain extends Window {
-          getTerrainHeight?: (x: number, z: number) => number;
-        }
-
-        const windowWithTerrain = window as WindowWithTerrain;
-
-        if (typeof windowWithTerrain.getTerrainHeight === 'function') {
-          return windowWithTerrain.getTerrainHeight(x, z);
-        } else {
-          // Fall back to a simple flat terrain if the world terrain isn't ready
-          return 0;
-        }
-      };
-
-      // Define the update function for physics-based movement
-      const update: IdentifiableFunction = (delta: number) => {
-        if (!velocityRef.current || !characterPositionRef.current) return;
-
-        // Get the collider for physics calculations
-        const collider = scene.getObjectByName('characterCollider') as THREE.Mesh;
-        if (!collider) return;
-
-        // Apply friction to slow down when not pressing movement keys
-        velocityRef.current.x *= friction;
-        velocityRef.current.z *= friction;
-
-        // Convert the keysRef to the expected type for typescript
-        const keys = keysRef as React.MutableRefObject<{
-          w: boolean;
-          a: boolean;
-          s: boolean;
-          d: boolean;
-          ' ': boolean;
-        }>;
-
-        // Get camera direction for movement relative to camera
-        const cameraDirection = new THREE.Vector3();
-        camera.getWorldDirection(cameraDirection);
-        cameraDirection.y = 0; // Keep movement on the x-z plane
-        cameraDirection.normalize();
-
-        // Create a vector perpendicular to camera direction for strafing
-        const cameraSide = new THREE.Vector3(-cameraDirection.z, 0, cameraDirection.x);
-
-        // Calculate the desired movement direction based on keys
-        // With our character now rotated to face -Z, W should move forward in that direction
-        const moveDirection = new THREE.Vector3(0, 0, 0);
-        if (keys.current.w) moveDirection.add(cameraDirection);  // Forward is camera direction
-        if (keys.current.s) moveDirection.sub(cameraDirection);  // Backward is opposite of camera direction
-        if (keys.current.a) moveDirection.sub(cameraSide);       // Left is opposite of perpendicular
-        if (keys.current.d) moveDirection.add(cameraSide);       // Right is perpendicular to camera direction
-
-        // Only normalize if we have some movement
-        if (moveDirection.lengthSq() > 0) {
-          moveDirection.normalize();
-
-          // Calculate target rotation based on movement direction
-          // This determines which way the character should face
-          const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
-
-          // Apply rotation to the model
-          if (characterRef.current) {
-            // Since our model is initially rotated by Math.PI to face -Z,
-            // we need to add PI to our target rotation for correct alignment
-            const currentRotation = characterRef.current.rotation.y;
-            const newRotation = lerpAngle(currentRotation, targetRotation, 10 * delta);
-            characterRef.current.rotation.y = newRotation;
-          }
-        }
-
-        // Apply ground movement
-        if (onGroundRef.current) {
-          // Apply movement based on key presses
-          if (moveDirection.lengthSq() > 0) {
-            const speedFactor = 5; // Adjust for desired speed
-            velocityRef.current.x = moveDirection.x * speedFactor;
-            velocityRef.current.z = moveDirection.z * speedFactor;
-          } else {
-            // Apply friction when no keys are pressed
-            velocityRef.current.x *= 0.9;
-            velocityRef.current.z *= 0.9;
-          }
-
-          // Jump if space is pressed and character is on the ground
-          if (keys.current[' '] && onGroundRef.current) {
-            velocityRef.current.y = 8; // Jump strength
-            onGroundRef.current = false;
-          }
-        }
-
-        // Apply gravity
-        if (!onGroundRef.current) {
-          velocityRef.current.y -= 20 * delta; // Gravity
-        }
-
-        // Apply velocity to position
-        characterPositionRef.current.x += velocityRef.current.x * delta;
-        characterPositionRef.current.y += velocityRef.current.y * delta;
-        characterPositionRef.current.z += velocityRef.current.z * delta;
-
-        // Get terrain height at character's position
-        const terrainHeight = getTerrainHeight(
-          characterPositionRef.current.x,
-          characterPositionRef.current.z
-        );
-
-        // Store this for the next frame
-        lastTerrainHeightRef.current = terrainHeight;
-
-        // Keep character above the terrain
-        if (characterPositionRef.current.y < terrainHeight + 1) { // +1 because our character is a 1-unit radius sphere
-          characterPositionRef.current.y = terrainHeight + 1;
-          velocityRef.current.y = 0;
-          onGroundRef.current = true;
-        }
-
-        // Update collider position
-        collider.position.copy(characterPositionRef.current);
-
-        // If we have a character model, update its position
-        if (characterRef.current) {
-          characterRef.current.position.copy(characterPositionRef.current);
-          // Lower it a bit but not too much, to keep character visible above terrain
-          characterRef.current.position.y -= 0.5;
-
-          // Ensure model is always visible
-          characterRef.current.visible = true;
-        }
-
-        // Call the position update callback if it exists
-        if (onPositionUpdate) {
-          onPositionUpdate(characterPositionRef.current);
-        }
-      };
-
       // Register the update function
       update._id = 'characterController';
       const unregisterUpdate = registerUpdate(update);
@@ -234,12 +269,14 @@ export default function CharacterController({
       // Return the cleanup function
       return () => {
         unregisterUpdate();
-        scene.remove(collider);
+        if (characterBodyRef.current) {
+          world.remove(characterBodyRef.current);
+        }
       };
     };
 
     setupCharacter();
-  }, [scene, keysRef, registerUpdate, camera, onPositionUpdate]);
+  }, [scene, keysRef, registerUpdate, camera, onPositionUpdate, world]);
 
   // Handle character model loaded from the Character component
   const handleModelLoaded = (model: THREE.Group) => {
@@ -249,11 +286,6 @@ export default function CharacterController({
     if (characterPositionRef.current) {
       model.position.copy(characterPositionRef.current);
       model.position.y -= 0.5; // Reduced offset for better visibility on terrain
-
-      // Update: We already rotated the model by Math.PI in Character.tsx,
-      // so we don't need to apply an initial rotation here.
-      // Removing this line since it's causing the initial opposite direction issue
-      // model.rotation.y = Math.PI;
 
       // Adjust scale if needed - scale up slightly for better visibility
       model.scale.set(1.2, 1.2, 1.2);

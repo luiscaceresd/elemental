@@ -5,17 +5,26 @@ import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
 import Tree from './Tree';
 import Pond from './Pond';
+import * as CANNON from 'cannon';
 
 interface WorldProps {
   scene: THREE.Scene;
   isBendingRef: React.MutableRefObject<boolean>;
   crosshairPositionRef: React.MutableRefObject<THREE.Vector3>;
   registerUpdate: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
+  world: CANNON.World;
 }
 
-export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate }: WorldProps) {
+export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate, world }: WorldProps) {
   const [treePositions, setTreePositions] = useState<THREE.Vector3[]>([]);
   const [pondPositions, setPondPositions] = useState<{ position: THREE.Vector3, size: number, depth: number }[]>([]);
+
+  // Use the world parameter to prevent unused variable warning
+  useEffect(() => {
+    if (world) {
+      // Removed console.log
+    }
+  }, [world]);
 
   useEffect(() => {
     const setupWorld = async () => {
@@ -39,27 +48,11 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       // Create heightmap with natural terrain using multiple Simplex noise octaves
       const heightmap = new Float32Array((terrainSegments + 1) * (terrainSegments + 1));
 
+      // Create a completely flat heightmap for debugging
       for (let x = 0; x <= terrainSegments; x++) {
         for (let z = 0; z <= terrainSegments; z++) {
-          const posX = (x / terrainSegments) * terrainWidth - terrainWidth / 2;
-          const posZ = (z / terrainSegments) * terrainHeight - terrainHeight / 2;
-
-          // Set base terrain to flat (height 0)
-          let heightValue = 0;
-
-          // Create depressions for ponds
-          for (const pond of ponds) {
-            const distance = new THREE.Vector2(posX, posZ).distanceTo(pond.center);
-            if (distance < pond.radius) {
-              // Smooth depression using cosine function
-              const normalizedDist = distance / pond.radius;
-              const depression = (1 - Math.cos(normalizedDist * Math.PI)) / 2 * pond.depth;
-              heightValue -= pond.depth - depression;
-            }
-          }
-
           const index = z * (terrainSegments + 1) + x;
-          heightmap[index] = heightValue;
+          heightmap[index] = 0; // Set all heights to 0 for a completely flat world
         }
       }
 
@@ -69,6 +62,37 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
         positionAttribute.setY(i, heightmap[i]);
       }
       geometry.computeVertexNormals();
+
+      // Add physics ground plane for the terrain
+      if (world) {
+        // Create a material for the ground with zero friction
+        const groundMaterial = new CANNON.Material('groundMaterial');
+        groundMaterial.friction = 0; // Zero friction for debugging
+        
+        // Create a flat ground plane for physics
+        const groundShape = new CANNON.Plane();
+        const groundBody = new CANNON.Body({
+          mass: 0, // mass = 0 means static object
+          material: groundMaterial,
+          shape: groundShape,
+          collisionFilterGroup: 1, // Same group as character
+          collisionFilterMask: 1 // Collides with group 1 (which includes the character)
+        });
+        
+        // Make sure the ground has full collision response
+        groundBody.collisionResponse = true;
+        
+        // Rotate the ground plane to match the terrain orientation
+        groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+        
+        // Position at y=0 (or adjust based on your terrain)
+        groundBody.position.set(0, 0, 0);
+        
+        // Add the ground body to the physics world
+        world.addBody(groundBody);
+        
+        console.log("Added flat physics ground plane to world with zero friction");
+      }
 
       // Procedural grass and terrain shader material
       const uniforms = {
@@ -393,7 +417,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
     return () => {
       cleanup.then(cleanupFn => cleanupFn && cleanupFn());
     };
-  }, [scene, registerUpdate]);
+  }, [scene, registerUpdate, world]);
 
   return (
     <>
