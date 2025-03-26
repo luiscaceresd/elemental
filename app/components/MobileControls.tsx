@@ -36,8 +36,8 @@ function Joystick({
         zone: joystickZoneRef.current,
         mode: 'static',
         position: {
-          left: '120px',
-          bottom: isPortrait ? '150px' : '120px' // Higher in portrait mode
+          left: isPortrait ? '80px' : '60px', // Closer to left edge (was 120px)
+          bottom: isPortrait ? '120px' : '100px' // Lower position (was 170px/150px)
         },
         color: 'rgba(255, 255, 255, 0.5)',
         size: 120
@@ -79,8 +79,8 @@ function Joystick({
   // Calculate position based on orientation
   const joystickStyle = {
     position: 'absolute' as const,
-    bottom: isPortrait ? '150px' : '120px',
-    left: '120px',
+    bottom: isPortrait ? '120px' : '100px', // Match the position in nipplejs create
+    left: isPortrait ? '80px' : '60px', // Closer to left edge
     width: '120px',
     height: '120px',
     borderRadius: '50%',
@@ -123,10 +123,10 @@ function ActionButton({
         bottom: isPortrait ? '100px' : '80px'
       };
     } else {
-      // SHOOT button (left)
+      // SHOOT button (left) - position higher on screen
       return {
-        right: isPortrait ? '140px' : '120px',
-        bottom: isPortrait ? '30px' : '30px'
+        right: isPortrait ? '240px' : '200px', // Move further to the right (was 140px/120px)
+        bottom: isPortrait ? '150px' : '130px'
       };
     }
   };
