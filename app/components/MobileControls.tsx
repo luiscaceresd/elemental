@@ -23,64 +23,90 @@ function Joystick({
 }) {
   const joystickZoneRef = useRef<HTMLDivElement>(null);
   const nippleInstanceRef = useRef<unknown>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    const setupJoystick = async () => {
-      // Dynamically import nipplejs for the joystick
-      const nipplejs = (await import('nipplejs')).default;
-
-      if (!joystickZoneRef.current) return;
-
-      // Create the joystick with dynamic positioning based on orientation
-      const nippleManager = nipplejs.create({
-        zone: joystickZoneRef.current,
-        mode: 'static',
-        position: {
-          left: isPortrait ? '80px' : '60px', // Closer to left edge (was 120px)
-          bottom: isPortrait ? '120px' : '100px' // Lower position (was 170px/150px)
-        },
-        color: 'rgba(255, 255, 255, 0.5)',
-        size: 120
-      });
-
-      nippleInstanceRef.current = nippleManager;
-
-      // Handle joystick movement
-      nippleManager.on('move', (evt, data) => {
-        if (data && data.vector) {
-          onMove(data.vector.x, data.vector.y);
-        }
-      });
-
-      // Handle joystick release
-      nippleManager.on('end', () => {
-        onEnd();
-      });
-
-      return () => {
-        if (nippleInstanceRef.current) {
-          // Check if destroy method exists
-          const nippleInstance = nippleInstanceRef.current as { destroy?: () => void };
-          if (nippleInstance.destroy) {
-            nippleInstance.destroy();
+    // Add a small delay to ensure the DOM is fully ready
+    const timer = setTimeout(() => {
+      const setupJoystick = async () => {
+        // Dynamically import nipplejs for the joystick
+        try {
+          const nipplejs = (await import('nipplejs')).default;
+  
+          if (!joystickZoneRef.current) {
+            console.error('Joystick zone ref not available');
+            return;
           }
+  
+          // First destroy any existing joystick to prevent duplication
+          if (nippleInstanceRef.current) {
+            const nippleInstance = nippleInstanceRef.current as { destroy?: () => void };
+            if (nippleInstance.destroy) {
+              nippleInstance.destroy();
+              nippleInstanceRef.current = null;
+            }
+          }
+  
+          // Create the joystick with dynamic positioning based on orientation
+          const nippleManager = nipplejs.create({
+            zone: joystickZoneRef.current,
+            mode: 'static',
+            position: {
+              left: '50%',
+              bottom: isPortrait ? '120px' : '100px' // Lower position
+            },
+            color: 'rgba(255, 255, 255, 0.5)',
+            size: 120
+          });
+  
+          nippleInstanceRef.current = nippleManager;
+          setIsInitialized(true);
+  
+          // Handle joystick movement
+          nippleManager.on('move', (evt, data) => {
+            if (data && data.vector) {
+              onMove(data.vector.x, data.vector.y);
+            }
+          });
+  
+          // Handle joystick release
+          nippleManager.on('end', () => {
+            onEnd();
+          });
+  
+          return () => {
+            if (nippleInstanceRef.current) {
+              // Check if destroy method exists
+              const nippleInstance = nippleInstanceRef.current as { destroy?: () => void };
+              if (nippleInstance.destroy) {
+                nippleInstance.destroy();
+                nippleInstanceRef.current = null;
+              }
+            }
+          };
+        } catch (error) {
+          console.error('Error initializing joystick:', error);
         }
       };
-    };
-
-    const cleanup = setupJoystick();
-    return () => {
-      cleanup.then(cleanupFn => {
-        if (cleanupFn) cleanupFn();
-      });
-    };
+  
+      const setup = setupJoystick();
+      return () => {
+        setup.then(cleanupFn => {
+          if (cleanupFn) cleanupFn();
+        }).catch(err => console.error('Error in joystick cleanup:', err));
+      };
+    }, 300); // Small delay to ensure DOM is ready
+    
+    return () => clearTimeout(timer);
   }, [onMove, onEnd, isPortrait]);
 
   // Calculate position based on orientation
   const joystickStyle = {
     position: 'absolute' as const,
     bottom: isPortrait ? '120px' : '100px', // Match the position in nipplejs create
-    left: isPortrait ? '80px' : '60px', // Closer to left edge
+    left: '50%',
+    transform: 'translateX(-50%)', // Center horizontally
     width: '120px',
     height: '120px',
     borderRadius: '50%',
@@ -184,15 +210,24 @@ function WaterCollectionOverlay({
   onWaterBendEnd?: () => void;
 }) {
   const [isCollecting, setIsCollecting] = useState(false);
-  const [showHint, setShowHint] = useState(true);
+  const [showHint, setShowHint] = useState(false);
   
-  // Hide hint after 10 seconds
+  // Initialize hint visibility based on localStorage and only once
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowHint(false);
-    }, 10000);
-    return () => clearTimeout(timer);
-  }, []);
+    // Check if we've shown the hint before
+    const hintShown = localStorage.getItem('waterBendHintShown');
+    if (!hintShown) {
+      setShowHint(true);
+      
+      // Hide hint after 10 seconds and mark as shown in localStorage
+      const timer = setTimeout(() => {
+        setShowHint(false);
+        localStorage.setItem('waterBendHintShown', 'true');
+      }, 10000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, []); // Empty dependency array - only run once
   
   const handleTouchStart = () => {
     setIsCollecting(true);

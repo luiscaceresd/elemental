@@ -189,10 +189,28 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
       // Animation loop with clock for delta time
       const clock = new THREE.Clock();
+      let animationFrameId: number;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      let isPaused = gameState === 'paused';
+      
+      // Store last known game state to detect changes
+      let lastGameState = gameState;
 
       const animate = () => {
-        requestAnimationFrame(animate);
+        animationFrameId = requestAnimationFrame(animate);
         const delta = clock.getDelta();
+
+        // Check if game state has changed
+        if (lastGameState !== gameState) {
+          if (gameState === 'paused') {
+            isPaused = true;
+            clock.stop(); // Stop the clock when paused
+          } else {
+            isPaused = false;
+            clock.start(); // Restart the clock when resuming
+          }
+          lastGameState = gameState;
+        }
 
         // Step the physics world forward with substeps for stability
         if (worldRef.current && gameState === 'playing') {
@@ -204,8 +222,12 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         // Run all registered update functions
         updateFunctionsRef.current.forEach(update => update(delta));
 
-        renderer.render(scene, camera);
+        // Always render the scene, even when paused
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
       };
+      
       animate();
 
       // Signal that the scene is ready
@@ -213,9 +235,15 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
       // Cleanup
       return () => {
-        if (containerRef.current && containerRef.current.contains(renderer.domElement)) {
+        // Cancel animation frame to stop rendering
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+        }
+        
+        if (containerRef.current && renderer.domElement && containerRef.current.contains(renderer.domElement)) {
           containerRef.current.removeChild(renderer.domElement);
         }
+        renderer.dispose();
         renderer.domElement.removeEventListener('contextmenu', preventContextMenu);
         window.removeEventListener('resize', handleResize);
         window.removeEventListener('keydown', onKeyDown);
@@ -232,7 +260,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         if (cleanupFn) cleanupFn();
       });
     };
-  }, [gameState]);
+  }, []); // Remove gameState from the dependency array to prevent recreation of the scene
 
   // Function to register update functions from child components - this is memoized
   const registerUpdate = useCallback((updateFn: IdentifiableFunction) => {
@@ -301,6 +329,18 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     // Set waterBending flag to false
     isBendingRef.current = false;
   }, [isBendingRef]);
+
+  // Add effect to handle gameState changes separately from scene initialization
+  useEffect(() => {
+    // Update game state in the animation loop when it changes
+    if (rendererRef.current) {
+      // If we're switching from paused to playing on mobile, make sure the camera looks right
+      if (gameState === 'playing' && isMobile && cameraRef.current) {
+        // Reset camera rotation flags to let it be automatically positioned
+        cameraRef.current.userData.hasBeenRotatedByUser = false;
+      }
+    }
+  }, [gameState, isMobile]);
 
   return (
     <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'relative' }}>
