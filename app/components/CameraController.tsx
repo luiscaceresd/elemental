@@ -64,6 +64,11 @@ export default function CameraController({
       if (isMobile) {
         // Set rotation order for consistency with PointerLockControls
         camera.rotation.order = 'YXZ';
+        
+        // Set initial orientation for mobile to match PC experience
+        camera.rotation.x = 0.1; // Slight downward tilt to match PC
+        camera.rotation.y = 0; // Initial forward direction
+        camera.userData.hasBeenRotatedByUser = false; // Allow for automatic orientation
 
         // Helper to check if touch is within joystick or jump button
         const isWithinControls = (target: EventTarget): boolean => {
@@ -239,10 +244,13 @@ export default function CameraController({
         // Calculate camera offset with fewer operations
         const horizontalDistance = (distanceFromCharacter + 2) * cosVerticalAngle;
         const heightOffset = (heightOffsetFromCharacter + 1) + distanceFromCharacter * sinVerticalAngle;
+        
+        // Mobile requires slightly higher camera position to avoid looking at the ground
+        const adjustedHeightOffset = isMobile ? heightOffset + 1 : heightOffset;
 
         // Calculate final offset with fewer vector operations
         const offsetX = horizontalDir.x * horizontalDistance;
-        const offsetY = heightOffset;
+        const offsetY = adjustedHeightOffset;
         const offsetZ = horizontalDir.z * horizontalDistance;
 
         // Create target position - this puts the camera behind the character
@@ -269,9 +277,12 @@ export default function CameraController({
             _lookTarget.set(
               targetPosition.x,
               targetPosition.y + 1.5, // Look at head level
-              targetPosition.z
+              targetPosition.z - 5 // Look forward instead of directly at character
             );
             cam.lookAt(_lookTarget);
+            
+            // Initialize with a slight downward tilt (less than before)
+            cam.rotation.x = 0.1; // Slight downward tilt, much less than default
           }
         }
       };
