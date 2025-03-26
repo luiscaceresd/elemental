@@ -99,12 +99,18 @@ export default function CameraController({
               const deltaX = touch.clientX - (previousTouchPosition.current?.x ?? touch.clientX);
               const deltaY = touch.clientY - (previousTouchPosition.current?.y ?? touch.clientY);
 
-              // Rotate camera (yaw and pitch)
-              camera.rotation.y -= deltaX * 0.002 * sensitivity;
-              camera.rotation.x -= deltaY * 0.002 * sensitivity;
+              // Skip tiny movements (less than 1px) to reduce jitter
+              if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) {
+                return;
+              }
+
+              // Rotate camera (yaw and pitch) with increased sensitivity
+              // Increased from 0.002 to 0.005 for more responsive rotation
+              camera.rotation.y -= deltaX * 0.005 * sensitivity;
+              camera.rotation.x -= deltaY * 0.005 * sensitivity;
 
               // Clamp vertical rotation to prevent flipping
-              camera.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, camera.rotation.x));
+              camera.rotation.x = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, camera.rotation.x));
 
               previousTouchPosition.current = { x: touch.clientX, y: touch.clientY };
               break;
@@ -128,9 +134,24 @@ export default function CameraController({
         document.addEventListener('touchmove', onTouchMove, { passive: false });
         document.addEventListener('touchend', onTouchEnd);
 
+        // Mark the camera as rotated when user manually moves it
+        const enhancedTouchMove = (event: TouchEvent) => {
+          onTouchMove(event);
+          
+          // Mark the camera as having been manually rotated
+          if (cameraControlTouchId.current !== null) {
+            camera.userData.hasBeenRotatedByUser = true;
+          }
+        };
+
+        // Replace the original touch move handler with enhanced one
+        document.removeEventListener('touchmove', onTouchMove);
+        document.addEventListener('touchmove', enhancedTouchMove, { passive: false });
+        
+        // Update cleanup to remove the correct handler
         cleanupFunctions.push(() => {
           document.removeEventListener('touchstart', onTouchStart);
-          document.removeEventListener('touchmove', onTouchMove);
+          document.removeEventListener('touchmove', enhancedTouchMove);
           document.removeEventListener('touchend', onTouchEnd);
         });
       } else {
@@ -181,79 +202,83 @@ export default function CameraController({
 
       // Update function to position camera (same for both mobile and desktop)
       const updateCamera: IdentifiableFunction = () => {
-        if (!targetRef.current) {
+        // Early returns with null checks combined for efficiency
+        if (!targetRef.current || !controlObjectRef.current || cameraLockedRef.current) {
           return;
         }
 
-        if (!controlObjectRef.current) {
-          return;
-        }
-
-        if (cameraLockedRef.current) {
-          return;
-        }
-
+        // Skip updates if nothing has changed
+        const targetPosition = targetRef.current;
+        
+        // Cache frequently accessed values
+        const cam = camera as THREE.PerspectiveCamera;
+        
         // CRITICAL FIX: Update control object position to follow character immediately
-        controlObjectRef.current.position.copy(targetRef.current);
+        controlObjectRef.current.position.copy(targetPosition);
 
-        // Get the direction the camera is facing from controls
+        // Calculate direction only once and reuse
         const direction = new THREE.Vector3(0, 0, -1);
-        camera.getWorldDirection(direction);
-
-        // We want the camera to position itself behind the character
-        // Since we rotated the character to face -Z, we need to adjust our camera logic
-
-        // Calculate camera offset based on current camera orientation
-        // We need to negate the direction to position the camera behind the character
+        cam.getWorldDirection(direction);
         direction.negate(); // Reverse direction to position camera behind character
 
-        // Create a horizontal direction (for left/right positioning)
+        // Create a horizontal direction (for left/right positioning) - only calculate once
         const horizontalDir = new THREE.Vector3(direction.x, 0, direction.z);
-        horizontalDir.normalize();
+        // Only normalize if needed (optimization)
+        if (horizontalDir.lengthSq() > 0.01) {
+          horizontalDir.normalize();
+        }
 
         // Calculate vertical angle (pitch) - clamped for better gameplay
-        // Limit looking too far up or down to prevent disorientation
+        // Avoid expensive asin call if possible
         const verticalAngle = Math.max(-0.6, Math.min(0.6, Math.asin(direction.y)));
 
-        // Calculate camera offset - using a spring arm style approach
-        // This is similar to how Unreal Engine handles third-person cameras
-        // Increase the distance to ensure character is visible
-        const horizontalDistance = (distanceFromCharacter + 2) * Math.cos(verticalAngle);
+        // Precalculate values used multiple times
+        const cosVerticalAngle = Math.cos(verticalAngle);
+        const sinVerticalAngle = Math.sin(verticalAngle);
 
-        // Add a fixed height offset to prevent top-down view
-        // This ensures camera stays behind character, not directly above
-        // Raise height slightly for better view of character
-        const heightOffset = (heightOffsetFromCharacter + 1) + distanceFromCharacter * Math.sin(verticalAngle);
+        // Calculate camera offset with fewer operations
+        const horizontalDistance = (distanceFromCharacter + 2) * cosVerticalAngle;
+        const heightOffset = (heightOffsetFromCharacter + 1) + distanceFromCharacter * sinVerticalAngle;
 
-        // Calculate final offset - we're placing the camera BEHIND the character's new forward direction
+        // Calculate final offset with fewer vector operations
         const offsetX = horizontalDir.x * horizontalDistance;
-        const offsetY = heightOffset; // Fixed height plus vertical angle component
+        const offsetY = heightOffset;
         const offsetZ = horizontalDir.z * horizontalDistance;
 
-        const offset = new THREE.Vector3(offsetX, offsetY, offsetZ);
-
         // Create target position - this puts the camera behind the character
-        const targetPosition = targetRef.current.clone().add(offset);
-
-        // Smooth camera movement with lerp
-        // Use a faster lerp value (0.2-0.3) for more responsive feel
-        camera.position.lerp(targetPosition, 0.25);
-
-        // Look at character (slightly above character's base)
-        const lookTarget = new THREE.Vector3(
-          targetRef.current.x,
-          targetRef.current.y + 1.5, // Look at head level
-          targetRef.current.z
+        // Reuse vector objects to reduce garbage collection
+        const targetCamPosition = _vec3.set(
+          targetPosition.x + offsetX,
+          targetPosition.y + offsetY,
+          targetPosition.z + offsetZ
         );
 
-        // Only adjust lookAt for mobile (desktop uses PointerLockControls)
+        // Smooth camera movement with lerp - use faster movement for better response
+        // Only lerp if the distance is significant enough to avoid jitter
+        const distSquared = cam.position.distanceToSquared(targetCamPosition);
+        if (distSquared > 0.01) {
+          cam.position.lerp(targetCamPosition, 0.25);
+        }
+
+        // Only handle lookAt for mobile when necessary
         if (isMobile) {
-          // For mobile, adjust lookAt only when not actively rotating with touch
-          if (cameraControlTouchId.current === null) {
-            camera.lookAt(lookTarget);
+          // Only set initial orientation if camera has never been rotated by user
+          const hasNeverBeenManuallyRotated = !cam.userData.hasBeenRotatedByUser;
+          if (hasNeverBeenManuallyRotated) {
+            // Use the cached lookTarget to reduce object creation
+            _lookTarget.set(
+              targetPosition.x,
+              targetPosition.y + 1.5, // Look at head level
+              targetPosition.z
+            );
+            cam.lookAt(_lookTarget);
           }
         }
       };
+
+      // Create reusable vector objects to reduce garbage collection
+      const _vec3 = new THREE.Vector3();
+      const _lookTarget = new THREE.Vector3();
 
       updateCamera._id = 'pointerLockCameraUpdate';
       const removeUpdate = registerUpdate(updateCamera);

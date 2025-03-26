@@ -279,6 +279,29 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     }, 100);
   }, []);
 
+  // Handle shoot button press (for water spear)
+  const handleShoot = useCallback(() => {
+    // Simulate right-click to shoot water spear
+    const event = new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true,
+      button: 2 // Right-click
+    });
+    window.dispatchEvent(event);
+  }, []);
+
+  // Handle water bending start
+  const handleWaterBendStart = useCallback(() => {
+    // Set waterBending flag to true
+    isBendingRef.current = true;
+  }, [isBendingRef]);
+
+  // Handle water bending end
+  const handleWaterBendEnd = useCallback(() => {
+    // Set waterBending flag to false
+    isBendingRef.current = false;
+  }, [isBendingRef]);
+
   return (
     <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'relative' }}>
       {/* Replace static crosshair with dynamic component */}
@@ -344,6 +367,9 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
               onJoystickMove={handleJoystickMove}
               onJoystickEnd={handleJoystickEnd}
               onJump={handleJump}
+              onShoot={handleShoot}
+              onWaterBendStart={handleWaterBendStart}
+              onWaterBendEnd={handleWaterBendEnd}
             />
           )}
         </>
