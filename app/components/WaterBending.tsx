@@ -99,22 +99,22 @@ export default function WaterBending({
       raycasterRef.current = new THREE.Raycaster();
 
       // Initialize shared resources for water projectile
-      spearGeometryRef.current = new THREE.CylinderGeometry(1.2, 0.4, 6.0, 16);
+      spearGeometryRef.current = new THREE.CylinderGeometry(0.4, 0.2, 4.0, 16);
       spearMaterialRef.current = new THREE.MeshPhysicalMaterial({
-        color: 0x00FFFF, // Brighter cyan
-        transparent: false, // Remove transparency
+        color: 0x00FFFF,
+        transparent: false,
         opacity: 1.0,
         roughness: 0,
-        metalness: 0.5,
+        metalness: 1.0, // Full metallic for a sharp look
         clearcoat: 1.0,
         clearcoatRoughness: 0.1,
-        transmission: 0, // Remove transmission to make fully visible
+        transmission: 0,
         ior: 1.33,
-        emissive: 0x00FFFF, // Match emissive to color
-        emissiveIntensity: 2.0 // Much stronger glow
+        emissive: 0x00FFFF,
+        emissiveIntensity: 5.0 // Much stronger glow for bullet-like effect
       });
 
-      glowGeometryRef.current = new THREE.CylinderGeometry(1.5, 0.6, 6.5, 16);
+      glowGeometryRef.current = new THREE.CylinderGeometry(0.6, 0.3, 4.5, 16);
       glowMaterialRef.current = new THREE.MeshBasicMaterial({
         color: 0xFFFFFF, // White glow
         transparent: true,
@@ -413,20 +413,27 @@ export default function WaterBending({
         spearGroup.quaternion.copy(quaternion);
 
         // Create a physics body for the spear
-        const spearShape = new CANNON.Sphere(0.5); // Simplified collision shape
+        const spearShape = new CANNON.Cylinder(0.4, 0.2, 4.0, 16);
         const spearBody = new CANNON.Body({
-          mass: 1, // Light but has mass
+          mass: 0.1, // Very light mass to minimize physics effects
           shape: spearShape,
           position: new CANNON.Vec3(
             spearGroup.position.x,
             spearGroup.position.y,
             spearGroup.position.z
           ),
-          material: new CANNON.Material("waterMaterial")
+          material: new CANNON.Material("waterMaterial"),
+          angularDamping: 1.0, // Maximum angular damping to prevent any rotation
+          linearDamping: 0, // No linear damping for constant velocity
+          fixedRotation: true // Lock rotation completely
         });
         
-        // Set velocity based on direction
-        const speed = 15; // Speed of the spear
+        // Disable gravity by setting force to zero
+        spearBody.force.set(0, 0, 0);
+        spearBody.updateMassProperties();
+        
+        // Set velocity based on direction with much higher speed
+        const speed = 200; // Dramatically increased speed for bullet-like behavior
         spearBody.velocity.set(
           direction.x * speed,
           direction.y * speed,
@@ -518,7 +525,6 @@ export default function WaterBending({
         const creationTime = Date.now();
 
         const updateSpear: IdentifiableFunction = (
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           delta: number
         ) => {
           // Skip if body was removed
@@ -532,6 +538,9 @@ export default function WaterBending({
           spearGroup.quaternion.copy(pooledSpear.body.quaternion as unknown as THREE.Quaternion);
 
           if (Date.now() - creationTime > maxLifetime) {
+            // Create explosion effect at current position before removing
+            createExplosionEffect(spearGroup.position);
+            
             // Lifetime expired, return to pool
             if (pooledSpear.body) {
               world.removeBody(pooledSpear.body);
@@ -545,6 +554,9 @@ export default function WaterBending({
           if (characterPositionRef?.current) {
             const distanceFromCharacter = spearGroup.position.distanceTo(characterPositionRef.current);
             if (distanceFromCharacter > 100) {
+              // Create explosion effect at current position before removing
+              createExplosionEffect(spearGroup.position);
+              
               if (pooledSpear.body) {
                 world.removeBody(pooledSpear.body);
               }
@@ -575,22 +587,33 @@ export default function WaterBending({
         // Set up collision detection for the spear
         spearBody.addEventListener('collide', (event: { type: string; body: CANNON.Body; contact: CANNON.ContactEquation; }) => {
           if (!pooledSpear.body) return; // Already handled
-            
-          // Get the collision point
-          const contactPoint = new THREE.Vector3(
-            event.contact.ri.x + pooledSpear.body.position.x,
-            event.contact.ri.y + pooledSpear.body.position.y,
-            event.contact.ri.z + pooledSpear.body.position.z
-          );
-            
-          // Create water drops at the collision point
-          createWaterDrops(contactPoint);
-            
-          // Remove the spear body and return to pool
-          world.removeBody(pooledSpear.body);
-          pooledSpear.body = undefined; // Clear the reference
-          returnSpearToPool(pooledSpear);
-          removeSpearUpdate();
+
+          // Only explode on floor contact
+          // Get the contact normal (pointing from body 1 to body 2)
+          const contactNormal = event.contact.ni;
+          
+          // Check if we're hitting a floor-like surface (normal pointing mostly up)
+          const isFloor = contactNormal.y > 0.7; // Threshold for what we consider a floor
+
+          if (isFloor) {
+            // Get the collision point
+            const contactPoint = new THREE.Vector3(
+              event.contact.ri.x + pooledSpear.body.position.x,
+              event.contact.ri.y + pooledSpear.body.position.y,
+              event.contact.ri.z + pooledSpear.body.position.z
+            );
+              
+            createExplosionEffect(contactPoint);
+              
+            // Remove the spear body and return to pool
+            world.removeBody(pooledSpear.body);
+            pooledSpear.body = undefined;
+            returnSpearToPool(pooledSpear);
+            removeSpearUpdate();
+          } else {
+            // For non-floor collisions, just pass through
+            // We achieve this by doing nothing, letting the spear continue
+          }
         });
 
         const updateId = `waterSpear_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
@@ -608,6 +631,19 @@ export default function WaterBending({
           // Double-check the spear is actually returned to the pool
           if (pooledSpear.inUse) {
             returnSpearToPool(pooledSpear);
+          }
+        };
+
+        // Helper function to create explosion effect at a given position
+        const createExplosionEffect = (position: THREE.Vector3) => {
+          // Create more intense explosion effect
+          for (let i = 0; i < 5; i++) { // 5 bursts of water drops
+            const offset = new THREE.Vector3(
+              (Math.random() - 0.5) * 4, // Wider spread
+              Math.random() * 3,
+              (Math.random() - 0.5) * 4
+            );
+            createWaterDrops(position.clone().add(offset));
           }
         };
       };
