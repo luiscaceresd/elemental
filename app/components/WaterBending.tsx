@@ -29,6 +29,13 @@ interface WaterBendingProps {
   world: CANNON.World;
 }
 
+// Define a WaterDrop type for our pool
+interface WaterDrop {
+  mesh: THREE.Mesh;
+  body: CANNON.Body;
+  inUse: boolean;
+}
+
 // Define a WaterSpear type for our pool
 interface WaterSpear {
   spearGroup: THREE.Group;
@@ -61,12 +68,13 @@ export default function WaterBending({
   const bendingParticlesRef = useRef<THREE.Points | null>(null);
   const collectedDropsRef = useRef<number>(0);
   const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]); // Back to just core spheres
-  const freeDropsRef = useRef<{ mesh: THREE.Mesh; body: CANNON.Body }[]>([]);
+  const waterDropPoolRef = useRef<WaterDrop[]>([]);
   const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 450;
   const REQUIRED_DROPS_TO_FIRE = 45;
   const MAX_VISIBLE_SPHERES = 10;
   const MAX_SPEAR_LIFETIME_MS = 10000; // Maximum lifetime for a spear
+  const WATER_DROP_POOL_SIZE = 300;
 
   // Add refs for shared water projectile resources
   const spearGeometryRef = useRef<THREE.CylinderGeometry | null>(null);
@@ -515,9 +523,6 @@ export default function WaterBending({
             drop.castShadow = true;
             drop.receiveShadow = true;
             scene.add(drop);
-
-            // Add to free drops with physics body
-            freeDropsRef.current.push({ mesh: drop, body: dropBody });
           }
         };
 
@@ -810,9 +815,9 @@ export default function WaterBending({
               if (object instanceof THREE.Mesh) {
                 // Check if object name indicates it's water
                 const isWaterByName = object.name.toLowerCase().includes('water') || 
-                                      object.name.toLowerCase().includes('lake') || 
-                                      object.name.toLowerCase().includes('river') ||
-                                      object.name.toLowerCase().includes('pond');
+                                      object.name.includes('lake') || 
+                                      object.name.includes('river') ||
+                                      object.name.includes('pond');
                 
                 // Check if object is explicitly marked as water via userData
                 const isWaterByUserData = object.userData && object.userData.isWater === true;
@@ -916,6 +921,71 @@ export default function WaterBending({
 
             bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
           }
+
+          // Update active water drops
+          waterDropPoolRef.current.forEach(drop => {
+            if (drop.inUse) {
+              // Check if character is in range
+              const characterInRange = characterPositionRef?.current 
+                ? drop.mesh.position.distanceTo(characterPositionRef.current) < 30 
+                : true;
+
+              if (characterInRange) {
+                // Pull the drop towards the crosshair with increased strength
+                const direction = new CANNON.Vec3(
+                  crosshairPositionRef.current.x - drop.body.position.x,
+                  crosshairPositionRef.current.y - drop.body.position.y,
+                  crosshairPositionRef.current.z - drop.body.position.z
+                );
+                const distanceSq = 
+                  Math.pow(crosshairPositionRef.current.x - drop.body.position.x, 2) +
+                  Math.pow(crosshairPositionRef.current.y - drop.body.position.y, 2) +
+                  Math.pow(crosshairPositionRef.current.z - drop.body.position.z, 2);
+                const distance = Math.sqrt(distanceSq);
+
+                // Increase pull range and strengthen the pull effect
+                if (distance < 30) {
+                  direction.normalize();
+                  const pullStrength = 25 * (1 - distance / 30);
+                  // Use normalized direction for the force
+                  const forceVec = new CANNON.Vec3(
+                    direction.x * pullStrength * delta * drop.body.mass,
+                    direction.y * pullStrength * delta * drop.body.mass,
+                    direction.z * pullStrength * delta * drop.body.mass
+                  );
+                  drop.body.applyForce(forceVec, drop.body.position);
+                }
+
+                // Make collection easier by increasing the collection radius
+                if (distance < 1.2) {
+                  if (collectedDropsRef.current < MAX_WATER_DROPS) {
+                    collectedDropsRef.current += 1;
+                    if (DEBUG_WATER_SOURCES) {
+                      // Debug logging removed
+                    }
+                    if (bendingEffectRef.current) {
+                      const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
+                      material.opacity = 0.8; // Brief bright flash
+                      setTimeout(() => {
+                        if (material) material.opacity = 0.4;
+                      }, 100);
+                    }
+                    // Deactivate the drop
+                    drop.inUse = false;
+                    drop.mesh.visible = false;
+                    drop.body.position.set(0, -1000, 0);
+                    drop.body.velocity.set(0, 0, 0);
+                  } else {
+                    // When water meter is full, just deactivate the drop
+                    drop.inUse = false;
+                    drop.mesh.visible = false;
+                    drop.body.position.set(0, -1000, 0);
+                    drop.body.velocity.set(0, 0, 0);
+                  }
+                }
+              }
+            }
+          });
         } else {
           if (bendingEffectRef.current) {
             (bendingEffectRef.current.material as THREE.MeshBasicMaterial).opacity = 0;
@@ -991,84 +1061,101 @@ export default function WaterBending({
             }
           }
         }
-
-        // Handle free water drops with physics
-        const dropsToRemove: { mesh: THREE.Mesh; body: CANNON.Body }[] = [];
-
-        for (const drop of freeDropsRef.current) {
-          // Update mesh position from physics body
-          drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
-          
-          // Always process free water drops when bending is active
-          if (isBendingRef.current && crosshairPositionRef.current) {
-            // Greatly increase the collection range for free water drops
-            const characterInRange = characterPositionRef?.current 
-              ? drop.mesh.position.distanceTo(characterPositionRef.current) < 30 
-              : true; // If no character position, don't restrict by distance
-            
-            if (characterInRange) {
-              // Pull the drop towards the crosshair with increased strength
-              const direction = new CANNON.Vec3(
-                crosshairPositionRef.current.x - drop.body.position.x,
-                crosshairPositionRef.current.y - drop.body.position.y,
-                crosshairPositionRef.current.z - drop.body.position.z
-              );
-              const distanceSq = 
-                Math.pow(crosshairPositionRef.current.x - drop.body.position.x, 2) +
-                Math.pow(crosshairPositionRef.current.y - drop.body.position.y, 2) +
-                Math.pow(crosshairPositionRef.current.z - drop.body.position.z, 2);
-              const distance = Math.sqrt(distanceSq);
-              
-              // Increase pull range and strengthen the pull effect
-              if (distance < 30) {
-                direction.normalize();
-                const pullStrength = 25 * (1 - distance / 30);
-                // Use normalized direction for the force
-                const forceVec = new CANNON.Vec3(
-                  direction.x * pullStrength * delta * drop.body.mass,
-                  direction.y * pullStrength * delta * drop.body.mass,
-                  direction.z * pullStrength * delta * drop.body.mass
-                );
-                drop.body.applyForce(forceVec, drop.body.position);
-              }
-              
-              // Make collection easier by increasing the collection radius
-              if (distance < 1.2) {
-                if (collectedDropsRef.current < MAX_WATER_DROPS) {
-                  collectedDropsRef.current += 1;
-                  if (DEBUG_WATER_SOURCES) {
-                    // Removed console.log
-                  }
-                  if (bendingEffectRef.current) {
-                    const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
-                    material.opacity = 0.8; // Brief bright flash
-                    setTimeout(() => {
-                      if (material) material.opacity = 0.4;
-                    }, 100);
-                  }
-                  scene.remove(drop.mesh);
-                  world.removeBody(drop.body);
-                  dropsToRemove.push(drop);
-                } else {
-                  // When water meter is full, just remove the drop without collecting
-                  if (DEBUG_WATER_SOURCES) {
-                    // Removed console.log
-                  }
-                  scene.remove(drop.mesh);
-                  world.removeBody(drop.body);
-                  dropsToRemove.push(drop);
-                }
-              }
-            }
-          }
-        }
-
-        if (dropsToRemove.length > 0) {
-          freeDropsRef.current = freeDropsRef.current.filter(d => !dropsToRemove.includes(d));
-        }
       };
       updateBendingEffects._id = 'bendingVisualEffects';
       const removeEffectsUpdate = registerUpdate(updateBendingEffects);
+
+      // Initialize the water drop pool
+      if (waterDropPoolRef.current.length === 0) {
+        for (let i = 0; i < WATER_DROP_POOL_SIZE; i++) {
+          const dropMesh = new THREE.Mesh(
+            dropGeometryRef.current!,
+            dropMaterialRef.current!
+          );
+          dropMesh.visible = false;
+          dropMesh.castShadow = true;
+          dropMesh.receiveShadow = true;
+          dropMesh.name = `water_drop_pooled_${i}`;
+          dropMesh.userData.isWater = true;
+          scene.add(dropMesh);
+
+          const dropBody = new CANNON.Body({
+            mass: 0.1,
+            shape: new CANNON.Sphere(0.3),
+            material: new CANNON.Material("waterDropMaterial")
+          });
+          // Place off-screen initially
+          dropBody.position.set(0, -1000, 0);
+          world.addBody(dropBody);
+
+          waterDropPoolRef.current.push({
+            mesh: dropMesh,
+            body: dropBody,
+            inUse: false
+          });
+        }
+      }
+
+      const createWaterDrops = (position: THREE.Vector3) => {
+        const dropsToActivate = 10;
+        let activated = 0;
+
+        for (const drop of waterDropPoolRef.current) {
+          if (!drop.inUse && activated < dropsToActivate) {
+            drop.inUse = true;
+
+            // Apply random offset around explosion position
+            const offset = new THREE.Vector3(
+              (Math.random() - 0.5) * 2,
+              Math.random() * 2,
+              (Math.random() - 0.5) * 2
+            );
+            const dropPos = position.clone().add(offset);
+
+            // Setup mesh
+            drop.mesh.position.copy(dropPos);
+            const scale = 0.5 + Math.random() * 0.5;
+            drop.mesh.scale.setScalar(scale);
+            drop.mesh.visible = true;
+
+            // Reset physics body
+            drop.body.position.copy(dropPos as unknown as CANNON.Vec3);
+            drop.body.velocity.set(
+              (Math.random() - 0.5) * 4,
+              Math.random() * 4,
+              (Math.random() - 0.5) * 4
+            );
+            activated++;
+          }
+        }
+      };
+
+      const updateWaterDrops: IdentifiableFunction = (delta: number) => {
+        waterDropPoolRef.current.forEach(drop => {
+          if (drop.inUse) {
+            // Update mesh position from physics body
+            drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
+
+            // Check if drop should be recycled
+            // Calculate velocity magnitude manually
+            const velocityMagnitude = Math.sqrt(
+              drop.body.velocity.x * drop.body.velocity.x +
+              drop.body.velocity.y * drop.body.velocity.y +
+              drop.body.velocity.z * drop.body.velocity.z
+            );
+            
+            if (drop.body.position.y < -10 || velocityMagnitude < 0.1) {
+              drop.inUse = false;
+              drop.mesh.visible = false;
+              // Reset position and velocity
+              drop.body.position.set(0, -1000, 0);
+              drop.body.velocity.set(0, 0, 0);
+            }
+          }
+        });
+      };
+      updateWaterDrops._id = 'waterDropsUpdate';
+      const removeWaterDropsUpdate = registerUpdate(updateWaterDrops);
 
       return () => {
         if (bendingEffectRef.current) scene.remove(bendingEffectRef.current);
@@ -1083,12 +1170,14 @@ export default function WaterBending({
         sphereGeometry.dispose();
         sphereMaterial.dispose();
 
-        // Clean up any physics bodies
-        freeDropsRef.current.forEach(drop => {
+        // Clean up water drop pool
+        waterDropPoolRef.current.forEach(drop => {
           scene.remove(drop.mesh);
           world.removeBody(drop.body);
+          drop.mesh.geometry.dispose();
+          (drop.mesh.material as THREE.Material).dispose();
         });
-        freeDropsRef.current = [];
+        waterDropPoolRef.current = [];
 
         // Cleanup spear pool and physics bodies
         spearPoolRef.current.forEach(spear => {
@@ -1098,9 +1187,8 @@ export default function WaterBending({
             if (spear.body) {
               world.removeBody(spear.body);
             }
-            spear.inUse = false; // Mark as not in use to prevent memory leaks
+            spear.inUse = false;
           }
-          // Dispose of the unique geometry (trail geometry)
           spear.trailGeometry.dispose();
         });
         
@@ -1116,6 +1204,7 @@ export default function WaterBending({
         hammer.destroy();
         removeEffectsUpdate();
         removeUpdateCrosshair();
+        removeWaterDropsUpdate();
         window.removeEventListener('mousedown', onRightClick, { capture: true });
         window.removeEventListener('mousedown', onMouseDown, { capture: true });
         window.removeEventListener('mouseup', onMouseUp, { capture: true });
@@ -1123,7 +1212,6 @@ export default function WaterBending({
     };
 
     const cleanup = setupWaterBending();
-
     return () => {
       cleanup.then(cleanupFn => {
         if (cleanupFn) cleanupFn();
