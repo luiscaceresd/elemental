@@ -14,9 +14,7 @@ declare module 'cannon' {
 }
 
 // Remove the manual type declaration
-type IdentifiableFunction = ((delta: number) => void) & {
-  _id?: string
-};
+type IdentifiableFunction = ((delta: number) => void) & { _id?: string };
 
 interface WaterBendingProps {
   scene: THREE.Scene;
@@ -36,7 +34,8 @@ interface WaterDrop {
   inUse: boolean;
 }
 
-// Define a WaterSpear type for our pool
+// Define a WaterSpear type for our pool – note the added initialVelocity property
+// Update your WaterSpear interface to include hasExploded
 interface WaterSpear {
   spearGroup: THREE.Group;
   trail: THREE.Points;
@@ -44,6 +43,8 @@ interface WaterSpear {
   body?: CANNON.Body;
   inUse: boolean;
   creationTime?: number; // When the spear was created/last used
+  hasExploded?: boolean; // NEW: tracks if the spear has exploded
+  initialVelocity?: THREE.Vector3; // For bullet-like travel
   _updateId?: string; // ID of the update function for this spear
 }
 
@@ -61,13 +62,11 @@ export default function WaterBending({
   world
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
-  // We'll keep the ref but just mark it as unused to avoid future errors
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2());
   const bendingEffectRef = useRef<THREE.Mesh | null>(null);
   const bendingParticlesRef = useRef<THREE.Points | null>(null);
   const collectedDropsRef = useRef<number>(0);
-  const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]); // Back to just core spheres
+  const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]);
   const waterDropPoolRef = useRef<WaterDrop[]>([]);
   const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 450;
@@ -76,7 +75,7 @@ export default function WaterBending({
   const MAX_SPEAR_LIFETIME_MS = 10000; // Maximum lifetime for a spear
   const WATER_DROP_POOL_SIZE = 300;
 
-  // Add refs for shared water projectile resources
+  // Shared resource refs for projectile resources
   const spearGeometryRef = useRef<THREE.CylinderGeometry | null>(null);
   const spearMaterialRef = useRef<THREE.MeshPhysicalMaterial | null>(null);
   const glowGeometryRef = useRef<THREE.CylinderGeometry | null>(null);
@@ -85,9 +84,9 @@ export default function WaterBending({
   const dropMaterialRef = useRef<THREE.MeshPhysicalMaterial | null>(null);
   const trailMaterialRef = useRef<THREE.PointsMaterial | null>(null);
 
-  // Add a spear pool for object reuse
+  // Spear pool for reuse
   const spearPoolRef = useRef<WaterSpear[]>([]);
-  const SPEAR_POOL_SIZE = 50; // Increased from 20 to 50 to prevent pool exhaustion
+  const SPEAR_POOL_SIZE = 50;
   const activeSpearUpdatesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -99,37 +98,74 @@ export default function WaterBending({
     return () => cancelAnimationFrame(animationId);
   }, []);
 
+  const returnSpearToPool = (spear: WaterSpear) => {
+    if (!spear || !spearPoolRef.current.includes(spear)) {
+      return;
+    }
+    if (!spear.inUse) {
+      return;
+    }
+    // Remove the physics body if it exists
+    if (spear.body) {
+      const body = spear.body;
+      setTimeout(() => {
+        if (body) world.removeBody(body);
+      }, 50);
+      spear.body = undefined;
+    }
+    // Remove from scene
+    try {
+      scene.remove(spear.spearGroup);
+      scene.remove(spear.trail);
+    } catch (_e) {
+      // Continue with cleanup even if removal fails
+    }
+    // Reset the trail positions to hide them
+    try {
+      const positions = spear.trailGeometry.attributes.position.array as Float32Array;
+      for (let i = 0; i < positions.length / 3; i++) {
+        positions[i * 3 + 1] = -1000; // Hide trail points
+      }
+      spear.trailGeometry.attributes.position.needsUpdate = true;
+    } catch (_e) {}
+    // Clean up any active update ID
+    if (spear._updateId && activeSpearUpdatesRef.current.has(spear._updateId)) {
+      activeSpearUpdatesRef.current.delete(spear._updateId);
+    }
+    // Mark the spear as available and reset explosion flag
+    spear.inUse = false;
+    spear._updateId = undefined;
+    spear.hasExploded = false;
+  };
+
   useEffect(() => {
     const setupWaterBending = async () => {
       const THREE = await import('three');
       const Hammer = (await import('hammerjs')).default;
-
       raycasterRef.current = new THREE.Raycaster();
 
-      // Initialize shared resources for water projectile
+      // Initialize shared resources for the projectile
       spearGeometryRef.current = new THREE.CylinderGeometry(0.4, 0.2, 4.0, 16);
       spearMaterialRef.current = new THREE.MeshPhysicalMaterial({
         color: 0x00FFFF,
         transparent: false,
         opacity: 1.0,
         roughness: 0,
-        metalness: 1.0, // Full metallic for a sharp look
+        metalness: 1.0,
         clearcoat: 1.0,
         clearcoatRoughness: 0.1,
         transmission: 0,
         ior: 1.33,
         emissive: 0x00FFFF,
-        emissiveIntensity: 5.0 // Much stronger glow for bullet-like effect
+        emissiveIntensity: 5.0
       });
-
       glowGeometryRef.current = new THREE.CylinderGeometry(0.6, 0.3, 4.5, 16);
       glowMaterialRef.current = new THREE.MeshBasicMaterial({
-        color: 0xFFFFFF, // White glow
+        color: 0xFFFFFF,
         transparent: true,
-        opacity: 0.8, // Stronger glow
+        opacity: 0.8,
         side: THREE.BackSide,
       });
-
       dropGeometryRef.current = new THREE.SphereGeometry(0.3, 16, 16);
       dropMaterialRef.current = new THREE.MeshPhysicalMaterial({
         color: 0xADD8E6,
@@ -142,7 +178,6 @@ export default function WaterBending({
         transmission: 0.9,
         ior: 1.33,
       });
-
       trailMaterialRef.current = new THREE.PointsMaterial({
         color: 0x87CEFA,
         size: 0.3,
@@ -151,55 +186,40 @@ export default function WaterBending({
         blending: THREE.AdditiveBlending,
       });
 
-      // Initialize the spear pool
+      // Initialize spear pool
       if (spearPoolRef.current.length === 0) {
         for (let i = 0; i < SPEAR_POOL_SIZE; i++) {
-          // Create spear group with spear and glow meshes
           const spearGroup = new THREE.Group();
-
-          // Create spear mesh using shared geometry and material
           const spear = new THREE.Mesh(spearGeometryRef.current, spearMaterialRef.current);
           spear.castShadow = true;
           spearGroup.add(spear);
-
-          // Create glow mesh using shared geometry and material
           const glow = new THREE.Mesh(glowGeometryRef.current, glowMaterialRef.current);
           spearGroup.add(glow);
-          
-          // Add a debug sphere to make the spear's position more obvious
           const debugSphere = new THREE.Mesh(
             new THREE.SphereGeometry(1.0, 16, 16),
             new THREE.MeshBasicMaterial({ color: 0xFF0000, transparent: true, opacity: 0.8 })
           );
           spearGroup.add(debugSphere);
-
-          // Create trail with unique geometry but shared material
           const trailGeometry = new THREE.BufferGeometry();
           const trailParticles = 30;
           const trailPositions = new Float32Array(trailParticles * 3);
-
-          // Initialize positions to be far away (they'll be reset when used)
           for (let j = 0; j < trailParticles; j++) {
             const j3 = j * 3;
             trailPositions[j3] = 0;
-            trailPositions[j3 + 1] = -1000; // Hidden position
+            trailPositions[j3 + 1] = -1000;
             trailPositions[j3 + 2] = 0;
           }
-
           trailGeometry.setAttribute('position', new THREE.BufferAttribute(trailPositions, 3));
           const trail = new THREE.Points(trailGeometry, trailMaterialRef.current);
-
-          // Add to pool (not to scene yet - will be added when used)
           spearPoolRef.current.push({
             spearGroup,
             trail,
             trailGeometry,
             inUse: false,
-            creationTime: Date.now() // Set initial creation time
+            creationTime: Date.now()
           });
         }
       } else {
-        // Ensure all spears are marked as not in use to prevent leaks after hot reloads
         spearPoolRef.current.forEach(spear => {
           spear.inUse = false;
           spear._updateId = undefined;
@@ -212,41 +232,37 @@ export default function WaterBending({
         transparent: true,
         opacity: 0.0,
       });
-
       const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
       scene.add(glowMesh);
       bendingEffectRef.current = glowMesh;
 
-      // Core sphere geometry and material with subtle glow
+      // Core sphere geometry/material for water belt
       const sphereGeometry = new THREE.SphereGeometry(0.15, 16, 16);
       const sphereMaterial = new THREE.MeshPhysicalMaterial({
         color: 0x00BFFF,
         transparent: true,
-        opacity: 0.8, // Fixed, subtle transparency
+        opacity: 0.8,
         roughness: 0.1,
         metalness: 0.2,
         clearcoat: 1.0,
         clearcoatRoughness: 0.1,
         transmission: 0.8,
         ior: 1.33,
-        emissive: 0x00BFFF, // Magical blue emissive
-        emissiveIntensity: 0.3, // Base intensity, subtle
+        emissive: 0x00BFFF,
+        emissiveIntensity: 0.3,
       });
 
-      // Particle system for bending effect
+      // Particle system for bending effect (unchanged)
       const particleCount = 100;
       const particleGeometry = new THREE.BufferGeometry();
       const particlePositions = new Float32Array(particleCount * 3);
-
       for (let i = 0; i < particleCount; i++) {
         const i3 = i * 3;
         particlePositions[i3] = 0;
         particlePositions[i3 + 1] = -1000;
         particlePositions[i3 + 2] = 0;
       }
-
       particleGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
-
       const particleMaterial = new THREE.PointsMaterial({
         color: 0x87CEFA,
         size: 0.2,
@@ -254,176 +270,210 @@ export default function WaterBending({
         opacity: 0.7,
         blending: THREE.AdditiveBlending,
       });
-
       const particles = new THREE.Points(particleGeometry, particleMaterial);
       scene.add(particles);
       bendingParticlesRef.current = particles;
 
+      // Update crosshair position from camera
       const updateCrosshairPosition = () => {
         if (!camera || !raycasterRef.current) return;
-
         raycasterRef.current.setFromCamera(new THREE.Vector2(0, 0), camera);
-
-        const newPosition = raycasterRef.current.ray.origin.clone()
+        const newPosition = raycasterRef.current.ray.origin
+          .clone()
           .add(raycasterRef.current.ray.direction.clone().multiplyScalar(15));
-
         crosshairPositionRef.current.copy(newPosition);
       };
 
-      const getSpearFromPool = (): WaterSpear | null => {
-        // First try to find any spears marked as inUse but with no active update
-        const potentiallyLeakedSpears = spearPoolRef.current.filter(spear => 
-          spear.inUse && 
-          spear._updateId && 
-          !activeSpearUpdatesRef.current.has(spear._updateId)
-        );
-        
-        if (potentiallyLeakedSpears.length > 0) {
-          // Return the first leaked spear to the pool
-          returnSpearToPool(potentiallyLeakedSpears[0]);
+      // Initialize water drop pool if not already done
+      if (waterDropPoolRef.current.length === 0) {
+        for (let i = 0; i < WATER_DROP_POOL_SIZE; i++) {
+          const dropMesh = new THREE.Mesh(dropGeometryRef.current!, dropMaterialRef.current!);
+          dropMesh.visible = false;
+          dropMesh.castShadow = true;
+          dropMesh.receiveShadow = true;
+          dropMesh.name = `water_drop_pooled_${i}`;
+          dropMesh.userData.isWater = true;
+          scene.add(dropMesh);
+          const dropBody = new CANNON.Body({
+            mass: 0.1,
+            shape: new CANNON.Sphere(0.3),
+            material: new CANNON.Material("waterDropMaterial")
+          });
+          dropBody.position.set(0, -1000, 0);
+          world.addBody(dropBody);
+          waterDropPoolRef.current.push({
+            mesh: dropMesh,
+            body: dropBody,
+            inUse: false
+          });
         }
-        
-        // Then look for a spear not in use
-        const availableSpear = spearPoolRef.current.find(spear => !spear.inUse);
+      }
 
-        if (availableSpear) {
-          availableSpear.inUse = true;
-          availableSpear.creationTime = Date.now(); // Track when this spear was allocated
-          return availableSpear;
-        }
-        
-        // If no available spear, attempt force cleanup of any spears that might be stuck
-        // This is a safety measure to prevent pool exhaustion
-        const oldestActiveSpear = findOldestActiveSpear();
-        if (oldestActiveSpear) {
-          returnSpearToPool(oldestActiveSpear);
-          
-          // Now try to get a spear again
-          const recycledSpear = spearPoolRef.current.find(spear => !spear.inUse);
-          if (recycledSpear) {
-            recycledSpear.inUse = true;
-            recycledSpear.creationTime = Date.now();
-            return recycledSpear;
+      // Improved createWaterDrops: use the preallocated pool and adjust drop parameters
+      const createWaterDrops = (position: THREE.Vector3) => {
+        const dropsToActivate = 10;
+        let activated = 0;
+        for (const drop of waterDropPoolRef.current) {
+          if (!drop.inUse && activated < dropsToActivate) {
+            drop.inUse = true;
+            drop.mesh.visible = true;
+            // Apply a random offset around the explosion position with reduced spread
+            const offset = new THREE.Vector3(
+              (Math.random() - 0.5) * 2,
+              Math.random() * 1.5, // reduced upward bias
+              (Math.random() - 0.5) * 2
+            );
+            const dropPos = position.clone().add(offset);
+            drop.mesh.position.copy(dropPos);
+            drop.body.position.set(dropPos.x, dropPos.y, dropPos.z);
+            // Apply gentler initial velocities
+            drop.body.velocity.set(
+              (Math.random() - 0.5) * 4,
+              Math.random() * 4 - 1, // reduced downward bias
+              (Math.random() - 0.5) * 4
+            );
+            activated++;
           }
         }
-
-        // If all else fails, force-cleanup all spears
-        forceCleanupAllSpears();
-        
-        // Try one more time
-        const emergencySpear = spearPoolRef.current.find(spear => !spear.inUse);
-        if (emergencySpear) {
-          emergencySpear.inUse = true;
-          emergencySpear.creationTime = Date.now();
-          return emergencySpear;
-        }
-        
-        return null;
-      };
-      
-      const findOldestActiveSpear = (): WaterSpear | null => {
-        // Find spears that have creation time stored
-        const activeSpears = spearPoolRef.current.filter(spear => spear.inUse);
-        if (activeSpears.length === 0) return null;
-        
-        // Find oldest spear based on creation time
-        return activeSpears.reduce((oldest, current) => {
-          // If current has no creation time, it's considered older
-          if (!current.creationTime) return current;
-          
-          // If oldest has no creation time, current is newer
-          if (!oldest.creationTime) return current;
-          
-          // Compare creation times
-          return current.creationTime < oldest.creationTime ? current : oldest;
-        }, activeSpears[0]);
       };
 
-      const returnSpearToPool = (spear: WaterSpear) => {
-        // Verify the spear exists and is from this pool
-        if (!spear || !spearPoolRef.current.includes(spear)) {
-          return;
-        }
-        
-        // If the spear is not marked as in use, it's already in the pool
-        if (!spear.inUse) {
-          return;
-        }
-        
-        // Remove the physics body if it exists
-        if (spear.body) {
-          world.removeBody(spear.body);
-          spear.body = undefined;
-        }
-        
-        // Remove from scene - use try/catch to handle potential errors
-        try {
-          scene.remove(spear.spearGroup);
-          scene.remove(spear.trail);
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (_e) {
-          // Continue with cleanup even if scene removal fails
-        }
-
-        // Reset trail positions to hidden
-        try {
-          const positions = spear.trailGeometry.attributes.position.array as Float32Array;
-          for (let i = 0; i < positions.length / 3; i++) {
-            positions[i * 3 + 1] = -1000; // Hide trail points
+      // The updateWaterDrops function (unchanged water collection logic)
+      const updateWaterDrops: IdentifiableFunction = (delta: number) => {
+        waterDropPoolRef.current.forEach(drop => {
+          if (drop.inUse) {
+            drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
+            // Recycle drop if it's too slow or below threshold
+            const velocityMagnitude = Math.sqrt(
+              drop.body.velocity.x * drop.body.velocity.x +
+              drop.body.velocity.y * drop.body.velocity.y +
+              drop.body.velocity.z * drop.body.velocity.z
+            );
+            if (drop.body.position.y < -10 || velocityMagnitude < 0.1) {
+              drop.inUse = false;
+              drop.mesh.visible = false;
+              drop.body.position.set(0, -1000, 0);
+              drop.body.velocity.set(0, 0, 0);
+            }
           }
-          spear.trailGeometry.attributes.position.needsUpdate = true;
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        } catch (_e) {
-          // Continue with cleanup even if trail reset fails
-        }
-
-        // If this spear has an update ID, clean it up from the active updates set
-        if (spear._updateId && activeSpearUpdatesRef.current.has(spear._updateId)) {
-          activeSpearUpdatesRef.current.delete(spear._updateId);
-        }
-
-        // Mark as available for reuse and clear updateId
-        spear.inUse = false;
-        spear._updateId = undefined;
+        });
       };
+      updateWaterDrops._id = 'waterDropsUpdate';
+      const removeWaterDropsUpdate = registerUpdate(updateWaterDrops);
 
+      // Create a water spear (projectile)
       const createWaterSpear = () => {
         if (!characterPositionRef?.current) return;
-
-        if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) {
-          return;
-        }
-
-        // Creating water spear
+        if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) return;
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
 
-        // Get a spear from the pool
-        const pooledSpear = getSpearFromPool();
-        if (!pooledSpear) {
-          return; // No spears available
-        }
+        // Helper: explosion effect – always trigger explosion on collision/lifetime
+        const createExplosionEffect = (position: THREE.Vector3) => {
+          for (let i = 0; i < 5; i++) {
+            const offset = new THREE.Vector3(
+              (Math.random() - 0.5) * 4,
+              Math.random() * 3,
+              (Math.random() - 0.5) * 4
+            );
+            createWaterDrops(position.clone().add(offset));
+          }
+        };
+
+        // Create a temporary particle system for immediate visual feedback of explosions
+        const triggerExplosion = (position: THREE.Vector3) => {
+          const particleCount = 50;
+          const positions = new Float32Array(particleCount * 3);
+          const velocities = new Float32Array(particleCount * 3);
+          
+          for (let i = 0; i < particleCount; i++) {
+            const index = i * 3;
+            // Start all particles from the center
+            positions[index] = position.x;
+            positions[index + 1] = position.y;
+            positions[index + 2] = position.z;
+            
+            // Random velocity for each particle
+            const speed = 5 + Math.random() * 5;
+            const angle = Math.random() * Math.PI * 2;
+            const elevation = Math.random() * Math.PI;
+            velocities[index] = Math.sin(elevation) * Math.cos(angle) * speed;
+            velocities[index + 1] = Math.cos(elevation) * speed;
+            velocities[index + 2] = Math.sin(elevation) * Math.sin(angle) * speed;
+          }
+          
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          
+          const material = new THREE.PointsMaterial({
+            color: 0x00FFFF,
+            size: 0.5,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+          });
+          
+          const explosionParticles = new THREE.Points(geometry, material);
+          scene.add(explosionParticles);
+
+          // Animate the explosion particles
+          let elapsed = 0;
+          const duration = 500; // milliseconds
+          const updateExplosion = () => {
+            elapsed += 16.67; // Approximate for 60fps
+            const progress = elapsed / duration;
+            
+            if (progress >= 1) {
+              scene.remove(explosionParticles);
+              geometry.dispose();
+              material.dispose();
+              return;
+            }
+            
+            // Update particle positions based on their velocities
+            const positions = geometry.attributes.position.array as Float32Array;
+            for (let i = 0; i < particleCount; i++) {
+              const index = i * 3;
+              positions[index] += velocities[index] * 0.0167; // deltaTime
+              positions[index + 1] += velocities[index + 1] * 0.0167;
+              positions[index + 2] += velocities[index + 2] * 0.0167;
+              
+              // Fade out particles
+              material.opacity = 0.8 * (1 - progress);
+            }
+            geometry.attributes.position.needsUpdate = true;
+            
+            requestAnimationFrame(updateExplosion);
+          };
+          
+          requestAnimationFrame(updateExplosion);
+        };
+
+        const pooledSpear = (() => {
+          // Try to get an available spear
+          const available = spearPoolRef.current.find(spear => !spear.inUse);
+          if (available) {
+            available.inUse = true;
+            available.creationTime = Date.now();
+            return available;
+          }
+          return null;
+        })();
+        if (!pooledSpear) return;
 
         const { spearGroup } = pooledSpear;
-
-        // Position and orient the spear
         spearGroup.position.copy(characterPositionRef.current);
-        spearGroup.position.y += 1.5; // Head level
-
+        spearGroup.position.y += 1.5;
         const direction = new THREE.Vector3();
         camera.getWorldDirection(direction);
         direction.normalize();
-        
-        // Position the spear in front of the character
-        spearGroup.position.add(direction.clone().multiplyScalar(2)); // Start 2 units in front
-        
+        spearGroup.position.add(direction.clone().multiplyScalar(2));
         const up = new THREE.Vector3(0, 1, 0);
         const quaternion = new THREE.Quaternion().setFromUnitVectors(up, direction);
         spearGroup.quaternion.copy(quaternion);
 
-        // Create a physics body for the spear
+        // Create physics body for the spear with bullet-like behavior
         const spearShape = new CANNON.Cylinder(0.4, 0.2, 4.0, 16);
         const spearBody = new CANNON.Body({
-          mass: 0.1, // Very light mass to minimize physics effects
+          mass: 0.1,
           shape: spearShape,
           position: new CANNON.Vec3(
             spearGroup.position.x,
@@ -431,149 +481,91 @@ export default function WaterBending({
             spearGroup.position.z
           ),
           material: new CANNON.Material("waterMaterial"),
-          angularDamping: 1.0, // Maximum angular damping to prevent any rotation
-          linearDamping: 0, // No linear damping for constant velocity
-          fixedRotation: true // Lock rotation completely
+          angularDamping: 1.0,
+          linearDamping: 0,
+          fixedRotation: true
         });
-        
-        // Disable gravity by setting force to zero
+        // Remove gravity effect on the spear by not altering its force
         spearBody.force.set(0, 0, 0);
         spearBody.updateMassProperties();
-        
-        // Set velocity based on direction with much higher speed
-        const speed = 200; // Dramatically increased speed for bullet-like behavior
-        spearBody.velocity.set(
-          direction.x * speed,
-          direction.y * speed,
-          direction.z * speed
-        );
-        
-        // Apply quaternion to body
-        const threeQuat = quaternion;
-        spearBody.quaternion.set(threeQuat.x, threeQuat.y, threeQuat.z, threeQuat.w);
-        
-        // Store the body in the pooled spear
+        // Set velocity based on direction with high speed
+        const speed = 200;
+        const velocity = direction.clone().multiplyScalar(speed);
+        spearBody.velocity.set(velocity.x, velocity.y, velocity.z);
+        // Store the initial velocity so we can override any deflections
+        pooledSpear.initialVelocity = velocity;
+        spearBody.quaternion.set(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
         pooledSpear.body = spearBody;
-        
-        // Add the body to the physics world
         world.addBody(spearBody);
-
-        // Add to scene
         scene.add(spearGroup);
         scene.add(pooledSpear.trail);
 
-        // Reset trail to spear position
-        const trailParticles = 30; // Same value used when creating the pool
+        // Reset trail to spear's position
+        const trailParticles = 30;
         const positions = pooledSpear.trailGeometry.attributes.position.array as Float32Array;
-        for (let i = 0; i < trailParticles; i++) {
-          positions[i * 3] = spearGroup.position.x;
-          positions[i * 3 + 1] = spearGroup.position.y;
-          positions[i * 3 + 2] = spearGroup.position.z;
+        for (let i = trailParticles - 1; i > 0; i--) {
+          const i3 = i * 3;
+          const prev3 = (i - 1) * 3;
+          positions[i3] = positions[prev3];
+          positions[i3 + 1] = positions[prev3 + 1];
+          positions[i3 + 2] = positions[prev3 + 2];
         }
+        positions[0] = spearGroup.position.x;
+        positions[1] = spearGroup.position.y;
+        positions[2] = spearGroup.position.z;
         pooledSpear.trailGeometry.attributes.position.needsUpdate = true;
 
-        const createWaterDrops = (position: THREE.Vector3) => {
-          for (let i = 0; i < 10; i++) {
-            // Use shared geometry and material for water drops
-            const drop = new THREE.Mesh(
-              dropGeometryRef.current || new THREE.SphereGeometry(0.3, 16, 16),
-              dropMaterialRef.current || new THREE.MeshPhysicalMaterial({
-                color: 0xADD8E6,
-                transparent: true,
-                opacity: 0.8,
-                roughness: 0.1,
-                metalness: 0.1,
-                clearcoat: 1.0,
-                clearcoatRoughness: 0.1,
-                transmission: 0.9,
-                ior: 1.33,
-              })
-            );
-            
-            // Properly name and tag the water drop for detection
-            drop.name = `water_drop_free_${Date.now()}_${i}`;
-            drop.userData.isWater = true; // Explicitly mark as water
-            
-            // Create physics body for the water drop
-            const dropShape = new CANNON.Sphere(0.3);
-            const dropBody = new CANNON.Body({
-              mass: 0.1, // Light mass
-              shape: dropShape,
-              position: new CANNON.Vec3(
-                position.x + (Math.random() - 0.5) * 2,
-                position.y + Math.random() * 2,
-                position.z + (Math.random() - 0.5) * 2
-              ),
-              material: new CANNON.Material("waterDropMaterial")
-            });
-            
-            // Set initial velocity
-            dropBody.velocity.set(
-              (Math.random() - 0.5) * 4,
-              Math.random() * 4,
-              (Math.random() - 0.5) * 4
-            );
-            
-            // Add to physics world
-            world.addBody(dropBody);
-            
-            // Position the mesh
-            drop.position.copy(dropBody.position as unknown as THREE.Vector3);
-            drop.scale.setScalar(0.5 + Math.random() * 0.5);
-            drop.castShadow = true;
-            drop.receiveShadow = true;
-            scene.add(drop);
-          }
-        };
-
-        const maxLifetime = 10000; // Doubled lifetime (was 5000)
+        const maxLifetime = 10000;
         const creationTime = Date.now();
 
-        const updateSpear: IdentifiableFunction = (
-          delta: number
-        ) => {
-          // Skip if body was removed
+        // Update function for the spear projectile
+        const updateSpear: IdentifiableFunction = (delta: number) => {
           if (!pooledSpear.body) {
             removeSpearUpdate();
             return;
           }
-          
-          // Update mesh position from physics body
+          // Override velocity to keep it bullet-like
+          if (pooledSpear.initialVelocity) {
+            pooledSpear.body.velocity.set(
+              pooledSpear.initialVelocity.x,
+              pooledSpear.initialVelocity.y,
+              pooledSpear.initialVelocity.z
+            );
+          }
+          // Update spear's mesh to follow its physics body
           spearGroup.position.copy(pooledSpear.body.position as unknown as THREE.Vector3);
           spearGroup.quaternion.copy(pooledSpear.body.quaternion as unknown as THREE.Quaternion);
 
-          if (Date.now() - creationTime > maxLifetime) {
-            // Create explosion effect at current position before removing
-            createExplosionEffect(spearGroup.position);
-            
-            // Lifetime expired, return to pool
-            if (pooledSpear.body) {
-              world.removeBody(pooledSpear.body);
+          // Explode if lifetime exceeded or if out-of-bounds
+          if (Date.now() - creationTime > maxLifetime ||
+             (characterPositionRef?.current && 
+              spearGroup.position.distanceTo(characterPositionRef.current) > 100)) {
+            if (!pooledSpear.hasExploded) {
+              pooledSpear.hasExploded = true;
+              // Trigger immediate visual explosion
+              triggerExplosion(spearGroup.position.clone());
+              // Create water drops
+              createExplosionEffect(spearGroup.position.clone());
             }
-            returnSpearToPool(pooledSpear);
-            removeSpearUpdate();
+            
+            if (pooledSpear.body) {
+              const body = pooledSpear.body;
+              setTimeout(() => {
+                if (body) world.removeBody(body);
+              }, 50);
+              pooledSpear.body = undefined;
+            }
+            
+            setTimeout(() => {
+              returnSpearToPool(pooledSpear);
+              removeSpearUpdate();
+            }, 50);
             return;
           }
 
-          // Check if spear is too far from character (out of bounds)
-          if (characterPositionRef?.current) {
-            const distanceFromCharacter = spearGroup.position.distanceTo(characterPositionRef.current);
-            if (distanceFromCharacter > 100) {
-              // Create explosion effect at current position before removing
-              createExplosionEffect(spearGroup.position);
-              
-              if (pooledSpear.body) {
-                world.removeBody(pooledSpear.body);
-              }
-              returnSpearToPool(pooledSpear);
-              removeSpearUpdate();
-              return;
-            }
-          }
-
-          // Update the trail
+          // Update the trail positions
+          const trailParticles = 30;
           const positions = pooledSpear.trailGeometry.attributes.position.array as Float32Array;
-
           for (let i = trailParticles - 1; i > 0; i--) {
             const i3 = i * 3;
             const prev3 = (i - 1) * 3;
@@ -581,98 +573,68 @@ export default function WaterBending({
             positions[i3 + 1] = positions[prev3 + 1];
             positions[i3 + 2] = positions[prev3 + 2];
           }
-
           positions[0] = spearGroup.position.x;
           positions[1] = spearGroup.position.y;
           positions[2] = spearGroup.position.z;
-
           pooledSpear.trailGeometry.attributes.position.needsUpdate = true;
         };
 
-        // Set up collision detection for the spear
+        // Always trigger explosion on any collision
         spearBody.addEventListener('collide', (event: { type: string; body: CANNON.Body; contact: CANNON.ContactEquation; }) => {
-          if (!pooledSpear.body) return; // Already handled
-
-          // Only explode on floor contact
-          // Get the contact normal (pointing from body 1 to body 2)
-          const contactNormal = event.contact.ni;
+          if (!pooledSpear.body) return;
+          if (!pooledSpear.hasExploded) {
+            pooledSpear.hasExploded = true;
+            // Trigger immediate visual explosion
+            triggerExplosion(spearGroup.position.clone());
+            // Create water drops
+            createExplosionEffect(spearGroup.position.clone());
+          }
           
-          // Check if we're hitting a floor-like surface (normal pointing mostly up)
-          const isFloor = contactNormal.y > 0.7; // Threshold for what we consider a floor
-
-          if (isFloor) {
-            // Get the collision point
-            const contactPoint = new THREE.Vector3(
-              event.contact.ri.x + pooledSpear.body.position.x,
-              event.contact.ri.y + pooledSpear.body.position.y,
-              event.contact.ri.z + pooledSpear.body.position.z
-            );
-              
-            createExplosionEffect(contactPoint);
-              
-            // Remove the spear body and return to pool
-            world.removeBody(pooledSpear.body);
-            pooledSpear.body = undefined;
+          const body = pooledSpear.body;
+          setTimeout(() => {
+            if (body) world.removeBody(body);
+          }, 50);
+          pooledSpear.body = undefined;
+          
+          setTimeout(() => {
             returnSpearToPool(pooledSpear);
             removeSpearUpdate();
-          } else {
-            // For non-floor collisions, just pass through
-            // We achieve this by doing nothing, letting the spear continue
-          }
+          }, 50);
         });
 
         const updateId = `waterSpear_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
         updateSpear._id = updateId;
-        pooledSpear._updateId = updateId; // Store the update ID in the spear object
+        pooledSpear._updateId = updateId;
         activeSpearUpdatesRef.current.add(updateId);
-        
-        // Store the remove function from registerUpdate
-        const removeFunc = registerUpdate(updateSpear);
-        const updateIdCopy = updateId; // Make a copy to avoid race conditions
         const removeSpearUpdate = () => {
-          activeSpearUpdatesRef.current.delete(updateIdCopy);
+          activeSpearUpdatesRef.current.delete(updateId);
           removeFunc();
-          
-          // Double-check the spear is actually returned to the pool
           if (pooledSpear.inUse) {
             returnSpearToPool(pooledSpear);
           }
         };
-
-        // Helper function to create explosion effect at a given position
-        const createExplosionEffect = (position: THREE.Vector3) => {
-          // Create more intense explosion effect
-          for (let i = 0; i < 5; i++) { // 5 bursts of water drops
-            const offset = new THREE.Vector3(
-              (Math.random() - 0.5) * 4, // Wider spread
-              Math.random() * 3,
-              (Math.random() - 0.5) * 4
-            );
-            createWaterDrops(position.clone().add(offset));
-          }
-        };
+        const removeFunc = registerUpdate(updateSpear);
       };
 
+      // Input handlers
       const onMouseDown = (event: MouseEvent) => {
         if (event.button === 0) {
           isBendingRef.current = true;
           updateCrosshairPosition();
         }
       };
-
       const onMouseUp = (event: MouseEvent) => {
         if (event.button === 0) {
           isBendingRef.current = false;
         }
       };
-
       const onRightClick = (event: MouseEvent) => {
         if (event.button === 2) {
           event.preventDefault();
           if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
             createWaterSpear();
           }
-        };
+        }
       };
 
       const getActiveSpearCount = (): number => {
@@ -680,106 +642,30 @@ export default function WaterBending({
       };
 
       const updateCrosshairOnTick: IdentifiableFunction = (delta: number) => {
-        // Use delta in calculation to avoid unused parameter warning
-        const effectiveDelta = Math.min(delta, 0.1); // Cap delta for stability
-        if (effectiveDelta > 0) { 
-          // Only update on non-zero deltas (ensures delta is used)
+        const effectiveDelta = Math.min(delta, 0.1);
+        if (effectiveDelta > 0) {
           updateCrosshairPosition();
-          
-          // Check if we have inconsistency between tracking sets
-          const activeSpears = getActiveSpearCount();
-          const activeUpdates = activeSpearUpdatesRef.current.size;
-          
-          // If we have more active spears than updates, force cleanup on each frame
-          if (activeSpears > activeUpdates) {
-            forceCleanupAllSpears();
-          }
-          
-          // Periodically clean up stale spears (every ~3 seconds)
-          const now = Date.now();
-          // Use effectiveDelta to adjust the frequency for higher framerates
-          if (now % Math.max(1000, 3000 * effectiveDelta) < 16) {
-            cleanupStaleSpears();
+          if (getActiveSpearCount() > activeSpearUpdatesRef.current.size) {
+            // Force cleanup if needed
           }
         }
       };
-      
-      const forceCleanupAllSpears = () => {
-        // Get all active spears
-        const activeSpears = spearPoolRef.current.filter(spear => spear.inUse);
-        
-        // Force return them all to the pool
-        activeSpears.forEach(spear => {
-          returnSpearToPool(spear);
-        });
-        
-        // Double-check that the cleanup worked
-        const stillActiveCount = spearPoolRef.current.filter(s => s.inUse).length;
-        if (stillActiveCount > 0) {
-          // Force reset the inUse flag on all spears as a last resort
-          spearPoolRef.current.forEach(spear => {
-            if (spear.inUse) {
-              try {
-                // Attempt to remove from scene if needed
-                scene.remove(spear.spearGroup);
-                scene.remove(spear.trail);
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              } catch (_e) {
-                // Removed console.error
-              }
-              spear.inUse = false;
-              spear._updateId = undefined;
-            }
-          });
-        }
-        
-        // Clear any orphaned update IDs from the set
-        const activeSpearIds = new Set(spearPoolRef.current.filter(s => s.inUse).map(s => s._updateId).filter(Boolean));
-        const orphanedUpdateIds = Array.from(activeSpearUpdatesRef.current).filter(id => !activeSpearIds.has(id));
-        
-        if (orphanedUpdateIds.length > 0) {
-          orphanedUpdateIds.forEach(id => activeSpearUpdatesRef.current.delete(id));
-        }
-      };
-      
-      const cleanupStaleSpears = () => {
-        const now = Date.now();
-        let cleanedCount = 0;
-        
-        spearPoolRef.current.forEach(spear => {
-          // If spear is in use and has a creation time that's older than MAX_SPEAR_LIFETIME_MS
-          if (spear.inUse && spear.creationTime && (now - spear.creationTime) > MAX_SPEAR_LIFETIME_MS) {
-            returnSpearToPool(spear);
-            cleanedCount++;
-          }
-        });
-        
-        // Log the cleanup result if debugging is enabled
-        if (DEBUG_WATER_SOURCES && cleanedCount > 0) {
-          // Removed console.log
-        }
-      };
-
       updateCrosshairOnTick._id = 'updateCrosshair';
       const removeUpdateCrosshair = registerUpdate(updateCrosshairOnTick);
 
-      window.addEventListener('mousedown', onMouseDown, { capture: true });
-      window.addEventListener('mouseup', onMouseUp, { capture: true });
-      window.addEventListener('mousedown', onRightClick, { capture: true });
+      // (Bending effects and water belt updates remain unchanged)
 
+      // Hammer input handling
       const hammer = new Hammer(domElement);
       const pan = new Hammer.Pan({ threshold: 0, pointers: 1 });
       hammer.add(pan);
-
       hammer.on('panstart', () => {
         isBendingRef.current = true;
         updateCrosshairPosition();
       });
-
       hammer.on('panend', () => {
         isBendingRef.current = false;
       });
-
       hammer.on('tap', () => {
         if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
           createWaterSpear();
@@ -804,74 +690,59 @@ export default function WaterBending({
             // Check if character is close enough to the crosshair position
             const distanceFromCharacter = characterPositionRef?.current ? 
               crosshairPositionRef.current.distanceTo(characterPositionRef.current) : Infinity;
-            const characterInRange = distanceFromCharacter < 15; // Only allow collection within 15 units of character
+            const characterInRange = distanceFromCharacter < 15;
 
             let nearWaterSource = false;
-            const waterSourceSearchRadius = 10; // Units to search for water around the crosshair
+            const waterSourceSearchRadius = 10;
             
-            // Look for water sources in the scene - detect meshes with water-related names
-            // or water materials (blue/transparent objects)
+            // Look for water sources in the scene
             scene.traverse((object) => {
               if (object instanceof THREE.Mesh) {
-                // Check if object name indicates it's water
                 const isWaterByName = object.name.toLowerCase().includes('water') || 
-                                      object.name.includes('lake') || 
-                                      object.name.includes('river') ||
-                                      object.name.includes('pond');
+                                    object.name.toLowerCase().includes('lake') || 
+                                    object.name.toLowerCase().includes('river') ||
+                                    object.name.toLowerCase().includes('pond');
                 
-                // Check if object is explicitly marked as water via userData
                 const isWaterByUserData = object.userData && object.userData.isWater === true;
                 
-                // Check if material indicates it's water (blue and possibly transparent)
                 let isWaterByMaterial = false;
                 if (object.material instanceof THREE.MeshPhysicalMaterial || 
                     object.material instanceof THREE.MeshStandardMaterial) {
                   const material = object.material;
-                  // Check for blue-ish color
                   if (material.color && 
-                      material.color.b > 0.6 && // Increased from 0.5 to 0.6 for more accurate detection
-                      material.color.b > material.color.r * 1.5 && // Must be significantly more blue than red
-                      material.color.b > material.color.g * 1.5) { // Must be significantly more blue than green
+                      material.color.b > 0.6 &&
+                      material.color.b > material.color.r * 1.5 &&
+                      material.color.b > material.color.g * 1.5) {
                     isWaterByMaterial = true;
                   }
                 }
                 
-                // If it appears to be water and is near the crosshair
                 if ((isWaterByName || isWaterByMaterial || isWaterByUserData) && 
                     object.position.distanceTo(crosshairPositionRef.current) < waterSourceSearchRadius) {
                   nearWaterSource = true;
-                  if (DEBUG_WATER_SOURCES) {
-                    // Removed console.log
-                  }
                 }
               }
             });
             
-            // Update particle positions - only spawn regular water particles when near water
+            // Update particle positions and handle water collection
             if (nearWaterSource && characterInRange) {
               for (let i = 0; i < 100; i++) {
                 const i3 = i * 3;
                 
                 if (positions[i3 + 1] < -100 && Math.random() < 0.1) {
-                  // Spawn new particles only when near water
                   const radius = 3 * Math.random();
                   const theta = Math.random() * Math.PI * 2;
                   const phi = Math.random() * Math.PI;
 
-                  // Start particles from character position for better visual effect
                   const startPos = characterPositionRef?.current ? 
                     characterPositionRef.current.clone() : 
                     crosshairPositionRef.current.clone();
-                  startPos.y += 1.5; // Start at character's head level
+                  startPos.y += 1.5;
 
-                  // End position at the crosshair
                   const targetPos = crosshairPositionRef.current;
-
-                  // Interpolate between start and target based on random progress
                   const progress = Math.random();
                   const pos = startPos.clone().lerp(targetPos, progress);
 
-                  // Add some spiral motion
                   pos.x += Math.sin(theta) * radius * (1 - progress);
                   pos.y += Math.cos(phi) * radius * (1 - progress) * 0.5;
                   pos.z += Math.cos(theta) * radius * (1 - progress);
@@ -880,32 +751,24 @@ export default function WaterBending({
                   positions[i3 + 1] = pos.y;
                   positions[i3 + 2] = pos.z;
                 } else if (positions[i3 + 1] > -100) {
-                  // Move existing particles toward the crosshair
                   const dirX = crosshairPositionRef.current.x - positions[i3];
                   const dirY = crosshairPositionRef.current.y - positions[i3 + 1];
                   const dirZ = crosshairPositionRef.current.z - positions[i3 + 2];
                   const length = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ);
                   
                   if (length < 0.5) {
-                    // Collect water when particles reach the crosshair
-                    positions[i3 + 1] = -1000; // Hide the particle
+                    positions[i3 + 1] = -1000;
                     if (collectedDropsRef.current < MAX_WATER_DROPS) {
                       collectedDropsRef.current += 1;
-                      if (DEBUG_WATER_SOURCES) {
-                        // Removed console.log
-                      }
                       if (bendingEffectRef.current) {
                         const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
-                        material.opacity = 0.8; // Brief bright flash
+                        material.opacity = 0.8;
                         setTimeout(() => {
                           if (material) material.opacity = 0.4;
                         }, 100);
                       }
-                    } else if (DEBUG_WATER_SOURCES) {
-                      // Removed console.log
                     }
                   } else {
-                    // Move particle toward crosshair
                     positions[i3] += dirX / length * 5 * delta;
                     positions[i3 + 1] += dirY / length * 5 * delta;
                     positions[i3 + 2] += dirZ / length * 5 * delta;
@@ -913,7 +776,6 @@ export default function WaterBending({
                 }
               }
             } else {
-              // When not near water sources, hide all particles
               for (let i = 0; i < 100; i++) {
                 positions[i * 3 + 1] = -1000;
               }
@@ -922,16 +784,17 @@ export default function WaterBending({
             bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
           }
 
-          // Update active water drops
+          // Update and collect water drops
           waterDropPoolRef.current.forEach(drop => {
             if (drop.inUse) {
+              drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
+              
               // Check if character is in range
-              const characterInRange = characterPositionRef?.current 
-                ? drop.mesh.position.distanceTo(characterPositionRef.current) < 30 
-                : true;
+              const characterInRange = characterPositionRef?.current ? 
+                drop.mesh.position.distanceTo(characterPositionRef.current) < 30 : true;
 
               if (characterInRange) {
-                // Pull the drop towards the crosshair with increased strength
+                // Pull drop toward the crosshair with increased strength
                 const direction = new CANNON.Vec3(
                   crosshairPositionRef.current.x - drop.body.position.x,
                   crosshairPositionRef.current.y - drop.body.position.y,
@@ -943,11 +806,9 @@ export default function WaterBending({
                   Math.pow(crosshairPositionRef.current.z - drop.body.position.z, 2);
                 const distance = Math.sqrt(distanceSq);
 
-                // Increase pull range and strengthen the pull effect
                 if (distance < 30) {
                   direction.normalize();
                   const pullStrength = 25 * (1 - distance / 30);
-                  // Use normalized direction for the force
                   const forceVec = new CANNON.Vec3(
                     direction.x * pullStrength * delta * drop.body.mass,
                     direction.y * pullStrength * delta * drop.body.mass,
@@ -956,32 +817,22 @@ export default function WaterBending({
                   drop.body.applyForce(forceVec, drop.body.position);
                 }
 
-                // Make collection easier by increasing the collection radius
                 if (distance < 1.2) {
                   if (collectedDropsRef.current < MAX_WATER_DROPS) {
                     collectedDropsRef.current += 1;
-                    if (DEBUG_WATER_SOURCES) {
-                      // Debug logging removed
-                    }
                     if (bendingEffectRef.current) {
                       const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
-                      material.opacity = 0.8; // Brief bright flash
+                      material.opacity = 0.8;
                       setTimeout(() => {
                         if (material) material.opacity = 0.4;
                       }, 100);
                     }
-                    // Deactivate the drop
-                    drop.inUse = false;
-                    drop.mesh.visible = false;
-                    drop.body.position.set(0, -1000, 0);
-                    drop.body.velocity.set(0, 0, 0);
-                  } else {
-                    // When water meter is full, just deactivate the drop
-                    drop.inUse = false;
-                    drop.mesh.visible = false;
-                    drop.body.position.set(0, -1000, 0);
-                    drop.body.velocity.set(0, 0, 0);
                   }
+                  // Reset the drop
+                  drop.inUse = false;
+                  drop.mesh.visible = false;
+                  drop.body.position.set(0, -1000, 0);
+                  drop.body.velocity.set(0, 0, 0);
                 }
               }
             }
@@ -993,11 +844,9 @@ export default function WaterBending({
 
           if (bendingParticlesRef.current) {
             const positions = bendingParticlesRef.current.geometry.attributes.position.array as Float32Array;
-
             for (let i = 0; i < 100; i++) {
               positions[i * 3 + 1] = -1000;
             }
-
             bendingParticlesRef.current.geometry.attributes.position.needsUpdate = true;
           }
         }
@@ -1009,7 +858,6 @@ export default function WaterBending({
           const waterRatio = Math.min(1, currentDrops / MAX_WATER_DROPS);
           const visibleSpheres = Math.min(currentDrops, MAX_VISIBLE_SPHERES);
 
-          // Adjust sphere count
           if (currentDrops > 0) {
             if (currentSpheres < visibleSpheres) {
               for (let i = currentSpheres; i < visibleSpheres; i++) {
@@ -1028,28 +876,23 @@ export default function WaterBending({
               }
             }
 
-            // Update belt appearance
             const baseRadius = 1.5 + waterRatio * 0.5;
             const time = Date.now() * 0.001;
 
             waterBeltSpheresRef.current.forEach((sphere, i) => {
               const totalSpheres = waterBeltSpheresRef.current.length;
               const angle = (i / totalSpheres) * Math.PI * 2;
-              // Position spheres
               if (characterPositionRef.current) {
-                // Copy the character's position and ensure we're tracking it properly
                 const characterPos = characterPositionRef.current.clone();
-
                 sphere.position.copy(characterPos);
                 sphere.position.x += Math.cos(angle + time * 0.5) * baseRadius;
-                sphere.position.y += 1.2 + Math.sin(time + angle * 5) * 0.2; // Slightly above character's feet
+                sphere.position.y += 1.2 + Math.sin(time + angle * 5) * 0.2;
                 sphere.position.z += Math.sin(angle + time * 0.5) * baseRadius;
               }
 
-              // Subtle magical blue light animation
               const material = sphere.material as THREE.MeshPhysicalMaterial;
-              const pulse = Math.sin(time * 1.5 + i * 0.3) * 0.2 + 0.8; // 0.6 to 1 range
-              material.emissiveIntensity = 0.4 + pulse * (0.2 + waterRatio * 0.3); // Subtle glow, max 0.8
+              const pulse = Math.sin(time * 1.5 + i * 0.3) * 0.2 + 0.8;
+              material.emissiveIntensity = 0.4 + pulse * (0.2 + waterRatio * 0.3);
             });
           } else {
             while (waterBeltSpheresRef.current.length > 0) {
@@ -1065,103 +908,15 @@ export default function WaterBending({
       updateBendingEffects._id = 'bendingVisualEffects';
       const removeEffectsUpdate = registerUpdate(updateBendingEffects);
 
-      // Initialize the water drop pool
-      if (waterDropPoolRef.current.length === 0) {
-        for (let i = 0; i < WATER_DROP_POOL_SIZE; i++) {
-          const dropMesh = new THREE.Mesh(
-            dropGeometryRef.current!,
-            dropMaterialRef.current!
-          );
-          dropMesh.visible = false;
-          dropMesh.castShadow = true;
-          dropMesh.receiveShadow = true;
-          dropMesh.name = `water_drop_pooled_${i}`;
-          dropMesh.userData.isWater = true;
-          scene.add(dropMesh);
-
-          const dropBody = new CANNON.Body({
-            mass: 0.1,
-            shape: new CANNON.Sphere(0.3),
-            material: new CANNON.Material("waterDropMaterial")
-          });
-          // Place off-screen initially
-          dropBody.position.set(0, -1000, 0);
-          world.addBody(dropBody);
-
-          waterDropPoolRef.current.push({
-            mesh: dropMesh,
-            body: dropBody,
-            inUse: false
-          });
-        }
-      }
-
-      const createWaterDrops = (position: THREE.Vector3) => {
-        const dropsToActivate = 10;
-        let activated = 0;
-
-        for (const drop of waterDropPoolRef.current) {
-          if (!drop.inUse && activated < dropsToActivate) {
-            drop.inUse = true;
-
-            // Apply random offset around explosion position
-            const offset = new THREE.Vector3(
-              (Math.random() - 0.5) * 2,
-              Math.random() * 2,
-              (Math.random() - 0.5) * 2
-            );
-            const dropPos = position.clone().add(offset);
-
-            // Setup mesh
-            drop.mesh.position.copy(dropPos);
-            const scale = 0.5 + Math.random() * 0.5;
-            drop.mesh.scale.setScalar(scale);
-            drop.mesh.visible = true;
-
-            // Reset physics body
-            drop.body.position.copy(dropPos as unknown as CANNON.Vec3);
-            drop.body.velocity.set(
-              (Math.random() - 0.5) * 4,
-              Math.random() * 4,
-              (Math.random() - 0.5) * 4
-            );
-            activated++;
-          }
-        }
-      };
-
-      const updateWaterDrops: IdentifiableFunction = (delta: number) => {
-        waterDropPoolRef.current.forEach(drop => {
-          if (drop.inUse) {
-            // Update mesh position from physics body
-            drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
-
-            // Check if drop should be recycled
-            // Calculate velocity magnitude manually
-            const velocityMagnitude = Math.sqrt(
-              drop.body.velocity.x * drop.body.velocity.x +
-              drop.body.velocity.y * drop.body.velocity.y +
-              drop.body.velocity.z * drop.body.velocity.z
-            );
-            
-            if (drop.body.position.y < -10 || velocityMagnitude < 0.1) {
-              drop.inUse = false;
-              drop.mesh.visible = false;
-              // Reset position and velocity
-              drop.body.position.set(0, -1000, 0);
-              drop.body.velocity.set(0, 0, 0);
-            }
-          }
-        });
-      };
-      updateWaterDrops._id = 'waterDropsUpdate';
-      const removeWaterDropsUpdate = registerUpdate(updateWaterDrops);
+      // Add event listeners
+      window.addEventListener('mousedown', onMouseDown, { capture: true });
+      window.addEventListener('mouseup', onMouseUp, { capture: true });
+      window.addEventListener('mousedown', onRightClick, { capture: true });
 
       return () => {
+        // Cleanup (removing objects, disposing geometries/materials, and event listeners)
         if (bendingEffectRef.current) scene.remove(bendingEffectRef.current);
         if (bendingParticlesRef.current) scene.remove(bendingParticlesRef.current);
-
-        // Cleanup water belt spheres
         waterBeltSpheresRef.current.forEach(sphere => {
           scene.remove(sphere);
           (sphere.material as THREE.Material).dispose();
@@ -1169,8 +924,6 @@ export default function WaterBending({
         waterBeltSpheresRef.current = [];
         sphereGeometry.dispose();
         sphereMaterial.dispose();
-
-        // Clean up water drop pool
         waterDropPoolRef.current.forEach(drop => {
           scene.remove(drop.mesh);
           world.removeBody(drop.body);
@@ -1178,8 +931,6 @@ export default function WaterBending({
           (drop.mesh.material as THREE.Material).dispose();
         });
         waterDropPoolRef.current = [];
-
-        // Cleanup spear pool and physics bodies
         spearPoolRef.current.forEach(spear => {
           if (spear.inUse) {
             scene.remove(spear.spearGroup);
@@ -1191,8 +942,6 @@ export default function WaterBending({
           }
           spear.trailGeometry.dispose();
         });
-        
-        // Dispose shared water projectile resources
         spearGeometryRef.current?.dispose();
         spearMaterialRef.current?.dispose();
         glowGeometryRef.current?.dispose();
@@ -1200,7 +949,6 @@ export default function WaterBending({
         dropGeometryRef.current?.dispose();
         dropMaterialRef.current?.dispose();
         trailMaterialRef.current?.dispose();
-
         hammer.destroy();
         removeEffectsUpdate();
         removeUpdateCrosshair();
