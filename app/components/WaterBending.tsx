@@ -52,6 +52,9 @@ interface WaterSpear {
 // Debug flag to show water source detection
 const DEBUG_WATER_SOURCES = false;
 
+// Enable/disable debug logs
+const DEBUG_LOGS = process.env.NODE_ENV !== 'production';
+
 export default function WaterBending({
   scene,
   domElement,
@@ -108,8 +111,20 @@ export default function WaterBending({
     // Remove the physics body if it exists
     if (spear.body) {
       const body = spear.body;
+      if (DEBUG_LOGS) {
+        console.log('Removing physics body for spear:', spear._updateId || 'unknown ID');
+      }
       setTimeout(() => {
-        if (body) world.removeBody(body);
+        if (body) {
+          try {
+            world.removeBody(body);
+            if (DEBUG_LOGS) {
+              console.log('Successfully removed physics body');
+            }
+          } catch (e) {
+            console.error('Failed to remove physics body:', e);
+          }
+        }
       }, 50);
       spear.body = undefined;
     }
@@ -161,6 +176,13 @@ export default function WaterBending({
         emissive: 0x00FFFF,
         emissiveIntensity: 5.0
       });
+      
+      // Set up periodic cleanup for any lingering resources
+      const CLEANUP_INTERVAL = 5000; // Run cleanup every 5 seconds
+      const periodicCleanupInterval = setInterval(() => {
+        cleanupLostSpears();
+      }, CLEANUP_INTERVAL);
+      
       glowGeometryRef.current = new THREE.CylinderGeometry(0.6, 0.3, 4.5, 16);
       glowMaterialRef.current = new THREE.MeshBasicMaterial({
         color: 0xFFFFFF,
@@ -538,10 +560,15 @@ export default function WaterBending({
           spearGroup.position.copy(pooledSpear.body.position as unknown as THREE.Vector3);
           spearGroup.quaternion.copy(pooledSpear.body.quaternion as unknown as THREE.Quaternion);
 
+          // Check if spear is out of bounds (vertical or horizontal distance)
+          const isOutOfBounds = 
+            spearGroup.position.y < -20 || // Below terrain level
+            spearGroup.position.y > 1000 || // Way too high
+            (characterPositionRef?.current && 
+            spearGroup.position.distanceTo(characterPositionRef.current) > 100); // Too far from player
+
           // Explode if lifetime exceeded or if out-of-bounds
-          if (Date.now() - creationTime > maxLifetime ||
-             (characterPositionRef?.current && 
-              spearGroup.position.distanceTo(characterPositionRef.current) > 100)) {
+          if (Date.now() - creationTime > maxLifetime || isOutOfBounds) {
             if (!pooledSpear.hasExploded) {
               pooledSpear.hasExploded = true;
               // Trigger immediate visual explosion
@@ -649,11 +676,77 @@ export default function WaterBending({
           updateCrosshairPosition();
           if (getActiveSpearCount() > activeSpearUpdatesRef.current.size) {
             // Force cleanup if needed
+            cleanupLostSpears();
           }
         }
       };
       updateCrosshairOnTick._id = 'updateCrosshair';
       const removeUpdateCrosshair = registerUpdate(updateCrosshairOnTick);
+
+      // Cleanup routine for spears without active updates
+      const cleanupLostSpears = () => {
+        const now = Date.now();
+        const activeCount = getActiveSpearCount();
+        const updateCount = activeSpearUpdatesRef.current.size;
+        
+        if (DEBUG_LOGS) {
+          console.log(`Cleanup check: ${activeCount} active spears, ${updateCount} update functions`);
+        }
+        
+        // Check for discrepancy between active spears and update functions
+        if (activeCount > updateCount) {
+          if (DEBUG_LOGS) {
+            console.log('Discrepancy detected: more active spears than update functions');
+          }
+        }
+        
+        spearPoolRef.current.forEach(spear => {
+          if (spear.inUse) {
+            // Check if the spear has an update function registered
+            const hasActiveUpdate = spear._updateId && activeSpearUpdatesRef.current.has(spear._updateId);
+            
+            // Check if the spear has been alive too long (30 seconds max lifetime)
+            const isTooOld = spear.creationTime && (now - spear.creationTime > 30000);
+            
+            // Check if the spear body exists but is in an invalid state
+            const hasInvalidBody = spear.body && (
+              isNaN(spear.body.position.x) || 
+              isNaN(spear.body.position.y) || 
+              isNaN(spear.body.position.z) ||
+              Math.abs(spear.body.position.x) > 1000 ||
+              Math.abs(spear.body.position.y) > 1000 ||
+              Math.abs(spear.body.position.z) > 1000
+            );
+            
+            // If the spear is in use but has no active update or is too old or has invalid body, return it to the pool
+            if (!hasActiveUpdate || isTooOld || hasInvalidBody) {
+              if (DEBUG_LOGS) {
+                console.log('Cleaning up problematic spear:', 
+                  spear._updateId || 'unknown ID', 
+                  {hasActiveUpdate, isTooOld, hasInvalidBody}
+                );
+              }
+              returnSpearToPool(spear);
+            }
+          }
+        });
+        
+        // Clean up any orphaned update IDs that don't correspond to active spears
+        const activeSpearIds = new Set(
+          spearPoolRef.current
+            .filter(spear => spear.inUse && spear._updateId)
+            .map(spear => spear._updateId)
+        );
+        
+        activeSpearUpdatesRef.current.forEach(updateId => {
+          if (!activeSpearIds.has(updateId)) {
+            if (DEBUG_LOGS) {
+              console.log('Removing orphaned update function:', updateId);
+            }
+            activeSpearUpdatesRef.current.delete(updateId);
+          }
+        });
+      };
 
       // (Bending effects and water belt updates remain unchanged)
 
@@ -951,6 +1044,10 @@ export default function WaterBending({
         dropGeometryRef.current?.dispose();
         dropMaterialRef.current?.dispose();
         trailMaterialRef.current?.dispose();
+        
+        // Clear the periodic cleanup interval
+        clearInterval(periodicCleanupInterval);
+        
         hammer.destroy();
         removeEffectsUpdate();
         removeUpdateCrosshair();
