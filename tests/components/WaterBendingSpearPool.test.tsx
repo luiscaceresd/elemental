@@ -4,33 +4,66 @@ import * as THREE from 'three';
 // Mock THREE.js classes
 vi.mock('three', async () => {
   const actual = await vi.importActual('three');
+  const mockVector3 = vi.fn().mockImplementation(() => ({
+    x: 0,
+    y: 0,
+    z: 0,
+    copy: function(v) { 
+      this.x = v.x; 
+      this.y = v.y; 
+      this.z = v.z; 
+      return this; 
+    },
+    clone: function() { 
+      return new THREE.Vector3().copy(this); 
+    },
+    add: function(v) { 
+      this.x += v.x; 
+      this.y += v.y; 
+      this.z += v.z; 
+      return this; 
+    },
+    sub: function(v) { 
+      this.x -= v.x; 
+      this.y -= v.y; 
+      this.z -= v.z; 
+      return this; 
+    },
+    normalize: function() {
+      const length = Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+      if (length > 0) {
+        this.x /= length;
+        this.y /= length;
+        this.z /= length;
+      }
+      return this;
+    },
+    multiplyScalar: function(scalar) {
+      this.x *= scalar;
+      this.y *= scalar;
+      this.z *= scalar;
+      return this;
+    },
+    length: function() {
+      return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+    },
+    distanceTo: vi.fn().mockReturnValue(5)
+  }));
+
   return {
     ...actual,
     Group: vi.fn().mockImplementation(() => ({
-      position: { copy: vi.fn(), add: vi.fn(), x: 0, y: 0, z: 0, distanceTo: vi.fn().mockReturnValue(5) },
+      position: new mockVector3(),
       add: vi.fn(),
       quaternion: { copy: vi.fn() },
-      rotateZ: vi.fn(),
+      rotateZ: vi.fn()
     })),
     Mesh: vi.fn().mockImplementation(() => ({
-      position: { copy: vi.fn(), add: vi.fn(), x: 0, y: 0, z: 0 },
+      position: new mockVector3(),
       scale: { setScalar: vi.fn() },
-      castShadow: false,
+      castShadow: false
     })),
-    Raycaster: vi.fn().mockImplementation(() => ({
-      set: vi.fn(),
-      intersectObject: vi.fn().mockReturnValue([]),
-    })),
-    Vector3: vi.fn().mockImplementation(() => ({
-      copy: vi.fn(),
-      add: vi.fn(),
-      sub: vi.fn(),
-      clone: vi.fn().mockReturnThis(),
-      normalize: vi.fn().mockReturnThis(),
-      multiplyScalar: vi.fn().mockReturnThis(),
-      length: vi.fn().mockReturnValue(1),
-      distanceTo: vi.fn().mockReturnValue(5),
-    })),
+    Vector3: mockVector3,
     BufferGeometry: vi.fn().mockImplementation(() => ({
       setAttribute: vi.fn(),
       attributes: {
@@ -39,7 +72,7 @@ vi.mock('three', async () => {
           needsUpdate: false
         }
       },
-      dispose: vi.fn(),
+      dispose: vi.fn()
     })),
     BufferAttribute: vi.fn(),
     Points: vi.fn().mockImplementation(() => ({
@@ -69,7 +102,7 @@ vi.mock('three', async () => {
     AdditiveBlending: 2,
     Quaternion: vi.fn().mockImplementation(() => ({
       setFromUnitVectors: vi.fn().mockReturnThis()
-    })),
+    }))
   };
 });
 
@@ -586,6 +619,53 @@ describe('EnhancedSpearPoolManager', () => {
     // will clean all updates, including orphaned ones
     expect(testPool.getActiveSpearCount()).toBe(0);
     expect(testPool.getActiveUpdateCount()).toBe(0); // All updates should be cleared
+  });
+  
+  it('should update spear positions correctly during movement', () => {
+    // Create a new pool instance
+    const testPool = new EnhancedSpearPoolManager(scene, registerUpdateMock, 10);
+    
+    // Get the initial pool size
+    const initialSize = testPool.getTotalPoolSize();
+    
+    // Create a spear with specific direction
+    const direction = new THREE.Vector3(0, 0, -1);
+    expect(testPool.createWaterSpear(characterPosition, camera, direction)).toBe(true);
+    
+    // Get the update function
+    const updateFunctions = vi.mocked(registerUpdateMock).mock.calls.map(call => call[0]);
+    const lastUpdateFn = updateFunctions[updateFunctions.length - 1];
+    
+    // Test that spear maintains straight flight
+    const spear = testPool['spearPool'].find(s => s.inUse);
+    expect(spear).toBeTruthy();
+    
+    if (spear) {
+      const initialPosition = new THREE.Vector3().copy(spear.spearGroup.position);
+      
+      // Simulate multiple updates
+      for (let i = 0; i < 5; i++) {
+        lastUpdateFn(0.016); // 60fps simulation
+      }
+      
+      // Verify spear moved in straight line along direction
+      const movement = new THREE.Vector3().copy(spear.spearGroup.position).sub(initialPosition);
+      const normalizedMovement = movement.normalize();
+      
+      // Direction should match within a small epsilon
+      expect(Math.abs(normalizedMovement.x - direction.x)).toBeLessThan(0.001);
+      expect(Math.abs(normalizedMovement.y - direction.y)).toBeLessThan(0.001);
+      expect(Math.abs(normalizedMovement.z - direction.z)).toBeLessThan(0.001);
+    }
+    
+    // Check active count is still 1
+    expect(testPool.getActiveSpearCount()).toBe(1);
+    
+    // Check pool size hasn't changed
+    expect(testPool.getTotalPoolSize()).toBe(initialSize);
+    
+    // Cleanup
+    testPool.cleanup();
   });
 });
 
