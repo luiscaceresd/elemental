@@ -302,6 +302,7 @@ export default function WaterBending({
             material: new CANNON.Material("waterDropMaterial")
           });
           dropBody.position.set(0, -1000, 0);
+          dropBody.sleep();
           world.addBody(dropBody);
           waterDropPoolRef.current.push({
             mesh: dropMesh,
@@ -328,6 +329,7 @@ export default function WaterBending({
             const dropPos = position.clone().add(offset);
             drop.mesh.position.copy(dropPos);
             drop.body.position.set(dropPos.x, dropPos.y, dropPos.z);
+            drop.body.wakeUp();
             // Apply gentler initial velocities
             drop.body.velocity.set(
               (Math.random() - 0.5) * 4,
@@ -355,6 +357,7 @@ export default function WaterBending({
               drop.mesh.visible = false;
               drop.body.position.set(0, -1000, 0);
               drop.body.velocity.set(0, 0, 0);
+              drop.body.sleep();
             }
           }
         });
@@ -835,6 +838,7 @@ export default function WaterBending({
                   drop.mesh.visible = false;
                   drop.body.position.set(0, -1000, 0);
                   drop.body.velocity.set(0, 0, 0);
+                  drop.body.sleep();
                 }
               }
             }
