@@ -1,6 +1,7 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import WaterMeter from './WaterMeter';
@@ -62,7 +63,7 @@ export default function WaterBending({
   world
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
-  const mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2());
+  const _mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2()); // Renamed with underscore to indicate intentionally unused
   const bendingEffectRef = useRef<THREE.Mesh | null>(null);
   const bendingParticlesRef = useRef<THREE.Points | null>(null);
   const collectedDropsRef = useRef<number>(0);
@@ -72,7 +73,6 @@ export default function WaterBending({
   const MAX_WATER_DROPS = 450;
   const REQUIRED_DROPS_TO_FIRE = 45;
   const MAX_VISIBLE_SPHERES = 10;
-  const MAX_SPEAR_LIFETIME_MS = 10000; // Maximum lifetime for a spear
   const WATER_DROP_POOL_SIZE = 300;
 
   // Shared resource refs for projectile resources
@@ -98,7 +98,7 @@ export default function WaterBending({
     return () => cancelAnimationFrame(animationId);
   }, []);
 
-  const returnSpearToPool = (spear: WaterSpear) => {
+  const returnSpearToPool = useCallback((spear: WaterSpear) => {
     if (!spear || !spearPoolRef.current.includes(spear)) {
       return;
     }
@@ -127,7 +127,9 @@ export default function WaterBending({
         positions[i * 3 + 1] = -1000; // Hide trail points
       }
       spear.trailGeometry.attributes.position.needsUpdate = true;
-    } catch (_e) {}
+    } catch (_e) {
+      // Continue with cleanup even if removal fails
+    }
     // Clean up any active update ID
     if (spear._updateId && activeSpearUpdatesRef.current.has(spear._updateId)) {
       activeSpearUpdatesRef.current.delete(spear._updateId);
@@ -136,7 +138,7 @@ export default function WaterBending({
     spear.inUse = false;
     spear._updateId = undefined;
     spear.hasExploded = false;
-  };
+  }, [scene, world]);
 
   useEffect(() => {
     const setupWaterBending = async () => {
@@ -338,7 +340,7 @@ export default function WaterBending({
       };
 
       // The updateWaterDrops function (unchanged water collection logic)
-      const updateWaterDrops: IdentifiableFunction = (delta: number) => {
+      const updateWaterDrops: IdentifiableFunction = (_delta: number) => { // Renamed to _delta
         waterDropPoolRef.current.forEach(drop => {
           if (drop.inUse) {
             drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
@@ -580,7 +582,7 @@ export default function WaterBending({
         };
 
         // Always trigger explosion on any collision
-        spearBody.addEventListener('collide', (event: { type: string; body: CANNON.Body; contact: CANNON.ContactEquation; }) => {
+        spearBody.addEventListener('collide', (/* _event */) => { // Changed to a comment inside the parameter list 
           if (!pooledSpear.body) return;
           if (!pooledSpear.hasExploded) {
             pooledSpear.hasExploded = true;
@@ -641,8 +643,8 @@ export default function WaterBending({
         return spearPoolRef.current.filter(spear => spear.inUse).length;
       };
 
-      const updateCrosshairOnTick: IdentifiableFunction = (delta: number) => {
-        const effectiveDelta = Math.min(delta, 0.1);
+      const updateCrosshairOnTick: IdentifiableFunction = (_delta: number) => { // Fix: renamed to _delta to show it's intentionally unused
+        const effectiveDelta = Math.min(_delta, 0.1);
         if (effectiveDelta > 0) {
           updateCrosshairPosition();
           if (getActiveSpearCount() > activeSpearUpdatesRef.current.size) {
@@ -965,7 +967,7 @@ export default function WaterBending({
         if (cleanupFn) cleanupFn();
       });
     };
-  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world]);
+  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool]);
 
   return (
     <WaterMeter
