@@ -19,6 +19,13 @@ type IdentifiableFunction = ((delta: number) => void) & {
 export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paused' }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [sceneReady, setSceneReady] = useState(false);
+  
+  // Use the prop directly without internal state
+  const effectiveGameState = gameState;
+  const setEffectiveGameState = (newState: 'playing' | 'paused') => {
+    // This is just a placeholder - we can't actually update the prop from here
+    console.log('Game state change requested:', newState);
+  };
 
   // Use a callback for device detection instead of useEffect
   const checkMobile = useCallback(() => {
@@ -83,18 +90,17 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
       // Initialize Cannon.js physics world
       const world = new CANNON.World();
-      world.gravity.set(0, -9.82, 0); // Earth-like gravity
-      world.broadphase = new CANNON.NaiveBroadphase(); // Simple collision detection
-      world.solver.iterations = 10; // Improve solver accuracy
-      world.defaultContactMaterial.contactEquationStiffness = 1e7; // Increase stiffness to prevent sinking
-      world.defaultContactMaterial.contactEquationRelaxation = 3; // Better stability
+      world.gravity.set(0, -20, 0); // slightly stronger gravity for better gameplay feel
+      world.broadphase = new CANNON.SAPBroadphase(world); // Use SAP (Sweep and Prune) broadphase for better performance
+      world.solver.iterations = 8; // Down from 10
+      world.allowSleep = true; // Let non-moving objects sleep for better performance
       worldRef.current = world;
 
       const camera = new THREE.PerspectiveCamera(
         75, // Field of view
         window.innerWidth / window.innerHeight, // Aspect ratio
         0.1, // Near clipping plane
-        1000 // Far clipping plane
+        300 // Reduced far clipping plane for better performance (was 1000)
       );
       cameraRef.current = camera;
 
@@ -121,24 +127,25 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
       // White main light for accurate water color rendering
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); // White light for truer colors
-      directionalLight.position.set(10, 20, 10);
+      directionalLight.position.set(50, 50, 30);
       directionalLight.castShadow = true; // Enable shadows
 
-      // Configure shadow properties for better quality
-      directionalLight.shadow.mapSize.width = 2048;
-      directionalLight.shadow.mapSize.height = 2048;
+      // Configure shadow properties for better performance
+      directionalLight.shadow.mapSize.width = 1024; // Reduced from 2048 for better performance
+      directionalLight.shadow.mapSize.height = 1024; // Reduced from 2048 for better performance
       directionalLight.shadow.camera.near = 0.5;
-      directionalLight.shadow.camera.far = 500;
-      directionalLight.shadow.camera.left = -100;
-      directionalLight.shadow.camera.right = 100;
-      directionalLight.shadow.camera.top = 100;
-      directionalLight.shadow.camera.bottom = -100;
+      directionalLight.shadow.camera.far = 100;
+      directionalLight.shadow.camera.left = -50;
+      directionalLight.shadow.camera.right = 50;
+      directionalLight.shadow.camera.top = 50;
+      directionalLight.shadow.camera.bottom = -50;
       directionalLight.shadow.bias = -0.0001;
       scene.add(directionalLight);
 
-      // Add secondary fill light for more depth
-      const fillLight = new THREE.DirectionalLight(0xE6D8AD, 0.3); // Warm fill light
-      fillLight.position.set(-5, 10, -10);
+      // Add secondary fill light for more depth - consider disabling for performance
+      const fillLight = new THREE.DirectionalLight(0xE6D8AD, 0.2); // Reduced intensity from 0.3
+      fillLight.position.set(-30, 30, -30);
+      fillLight.castShadow = false; // Disable shadows on fill light for performance
       scene.add(fillLight);
 
       // Enable shadows in renderer
@@ -149,7 +156,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       scene.fog = new THREE.Fog(0x87CEFA, 70, 300); // Increased distance for better visibility
 
       // Initialize character position reference
-      characterPositionRef.current = new THREE.Vector3(0, 1, 5);
+      characterPositionRef.current = new THREE.Vector3(0, 10, 5);
 
       // Handle keyboard inputs for PC controls
       const onKeyDown = (event: KeyboardEvent) => {
@@ -191,31 +198,31 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       const clock = new THREE.Clock();
       let animationFrameId: number;
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      let isPaused = gameState === 'paused';
+      let isPaused = effectiveGameState === 'paused';
       
       // Store last known game state to detect changes
-      let lastGameState = gameState;
+      let lastGameState = effectiveGameState;
 
       const animate = () => {
         animationFrameId = requestAnimationFrame(animate);
         const delta = clock.getDelta();
 
         // Check if game state has changed
-        if (lastGameState !== gameState) {
-          if (gameState === 'paused') {
+        if (lastGameState !== effectiveGameState) {
+          if (effectiveGameState === 'paused') {
             isPaused = true;
             clock.stop(); // Stop the clock when paused
           } else {
             isPaused = false;
             clock.start(); // Restart the clock when resuming
           }
-          lastGameState = gameState;
+          lastGameState = effectiveGameState;
         }
 
-        // Step the physics world forward with substeps for stability
-        if (worldRef.current && gameState === 'playing') {
-          const maxSubSteps = 5; // More substeps for better stability
-          const fixedTimeStep = 1/120; // Smaller timestep for more precision
+        // Step the physics world forward with fewer substeps for better performance
+        if (worldRef.current && effectiveGameState === 'playing') {
+          const maxSubSteps = 3; // Reduced from 5 for better performance
+          const fixedTimeStep = 1/60; // Adjusted to 60 FPS from 120 for better performance
           worldRef.current.step(fixedTimeStep, delta, maxSubSteps);
         }
 
@@ -260,7 +267,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         if (cleanupFn) cleanupFn();
       });
     };
-  }, []); // Remove gameState from the dependency array to prevent recreation of the scene
+  }, [effectiveGameState]); // Add effectiveGameState to the dependencies
 
   // Function to register update functions from child components - this is memoized
   const registerUpdate = useCallback((updateFn: IdentifiableFunction) => {
@@ -332,15 +339,35 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
   // Add effect to handle gameState changes separately from scene initialization
   useEffect(() => {
+    if (!sceneRef.current || !cameraRef.current) return;
+    
     // Update game state in the animation loop when it changes
     if (rendererRef.current) {
       // If we're switching from paused to playing on mobile, make sure the camera looks right
-      if (gameState === 'playing' && isMobile && cameraRef.current) {
+      if (effectiveGameState === 'playing' && isMobile && cameraRef.current) {
         // Reset camera rotation flags to let it be automatically positioned
         cameraRef.current.userData.hasBeenRotatedByUser = false;
       }
     }
-  }, [gameState, isMobile]);
+  }, [effectiveGameState, isMobile, cameraRef, rendererRef]);
+
+  // Set up event listeners to detect game events like "esc" to pause the game
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (effectiveGameState === 'playing') {
+          setEffectiveGameState('paused');
+        } else if (effectiveGameState === 'paused') {
+          setEffectiveGameState('playing');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [effectiveGameState]); // Use the effectiveGameState
 
   return (
     <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'relative' }}>
@@ -360,7 +387,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
           {/* Add pond directly (not needed if already added in World) */}
           <Pond
-            position={new THREE.Vector3(20, 0, 20)}
+            position={new THREE.Vector3(20, 5, 20)}
             size={15}
             depth={3}
             scene={sceneRef.current}
@@ -385,9 +412,9 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             domElement={rendererRef.current.domElement}
             registerUpdate={registerUpdate}
             isMobile={isMobile}
-            // Add shorter distance and higher height for better visibility
-            distance={7}
-            height={3}
+            // Improved camera settings for better view of the larger arena
+            distance={15}
+            height={7}
           />
 
           <WaterBending
@@ -402,7 +429,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
           />
 
           {/* Show mobile controls only on mobile devices when game is playing */}
-          {isMobile && gameState === 'playing' && (
+          {isMobile && effectiveGameState === 'playing' && (
             <MobileControls
               onJoystickMove={handleJoystickMove}
               onJoystickEnd={handleJoystickEnd}

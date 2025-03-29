@@ -1,11 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
-import { AnimationMixer, AnimationAction, AnimationClip } from 'three';
-import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader';
+import { useGLTFModel } from '../hooks/useGLTFModel';
 
 // Add a type for identifiable functions as used in other components
 type IdentifiableFunction = ((delta: number) => void) & {
@@ -28,176 +25,82 @@ export default function Character({
   registerUpdate
 }: CharacterProps) {
   const modelRef = useRef<THREE.Group | null>(null);
-  const mixerRef = useRef<AnimationMixer | null>(null);
-  const actionsRef = useRef<{ [key: string]: AnimationAction }>({});
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    // Check if we already have a model loaded to prevent duplicates
-    if (modelRef.current) {
-      return; // Don't load again if we already have a model
+  
+  // Load character model using the new hook
+  const { mixer, actions, animations } = useGLTFModel({
+    scene,
+    modelPath: '/models/character.glb',
+    position,
+    scale,
+    rotation: new THREE.Euler(0, Math.PI, 0), // Face forward (180° Y rotation)
+    name: 'characterModel',
+    onLoaded: (loadedModel) => {
+      // Store the model in a ref for later use
+      modelRef.current = loadedModel;
+      
+      // Notify parent that model is loaded
+      if (onModelLoaded) {
+        onModelLoaded(loadedModel);
+      }
+      
+      // Play default animation if available
+      if (actions['idle']) {
+        actions['idle'].play();
+      } else if (animations.length > 0) {
+        // If no 'idle' animation, play the first available animation
+        const firstAnimName = animations[0].name;
+        actions[firstAnimName].play();
+      }
     }
+  });
 
-    const loadModel = async () => {
-      try {
-        // Remove any existing character models from the scene
-        scene.children.forEach(child => {
-          if (child.name === 'characterModel') {
-            scene.remove(child);
-          }
-        });
-
-        // Create DRACOLoader
-        const dracoLoader = new DRACOLoader();
-        // Specify the path to the Draco decoder (using the default from three.js CDN)
-        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-        // Optional: For better performance, specify that we want to use JS decoder
-        dracoLoader.setDecoderConfig({ type: 'js' });
-
-        // Create GLTFLoader and attach DRACOLoader
-        const loader = new GLTFLoader();
-        loader.setDRACOLoader(dracoLoader);
-
-        // Load the character model
-        const gltf = await new Promise<GLTF>((resolve, reject) => {
-          loader.load(
-            '/models/character.glb',
-            (gltf) => resolve(gltf),
-            () => {
-              // Progress tracking omitted
-            },
-            (error) => {
-              // Log loading errors to help with debugging
-              console.error('Error loading character model:', error);
-              reject(error);
-            }
-          );
-        });
-
-        // Set up the model
-        const model = gltf.scene;
-
-        // Give the model a name for identification
-        model.name = 'characterModel';
-
-        // Position and scale the model
-        model.position.copy(position);
-        model.scale.copy(scale);
-
-        // Adjust character orientation to align with movement direction
-        // In standard ThreeJS, forward direction is -Z
-        // But our movement is calculated relative to the camera direction
-        // We rotate 180 degrees to face the character forward properly
-        model.rotation.y = Math.PI;
-
-        // Ensure all materials and meshes are visible
-        model.traverse((node) => {
-          if (node instanceof THREE.Mesh) {
-            node.castShadow = true;
-            node.receiveShadow = true;
-            node.visible = true;
-
-            // Check and fix material visibility
-            if (node.material) {
-              const materials = Array.isArray(node.material) ? node.material : [node.material];
-              materials.forEach(material => {
-                material.visible = true;
-                material.transparent = false;
-                material.opacity = 1.0;
-                material.needsUpdate = true;
-              });
-            }
-          }
-        });
-
-        // Store the model in a ref for later use
-        modelRef.current = model;
-
-        // Add the model to the scene
-        scene.add(model);
-
-        // Set up animations if they exist
-        if (gltf.animations && gltf.animations.length > 0) {
-          const mixer = new THREE.AnimationMixer(model);
-          mixerRef.current = mixer;
-
-          // Animation names are available but not logged to console
-
-          // Create animation actions and store them in the ref
-          gltf.animations.forEach((clip: AnimationClip) => {
-            const action = mixer.clipAction(clip);
-            actionsRef.current[clip.name] = action;
-          });
-
-          // Play the idle animation by default if it exists
-          if (actionsRef.current['idle']) {
-            actionsRef.current['idle'].play();
-          } else if (gltf.animations.length > 0) {
-            // If no 'idle' animation, play the first available animation
-            const firstAnimName = gltf.animations[0].name;
-            actionsRef.current[firstAnimName].play();
-          }
-        }
-
-        // Notify parent that model is loaded
-        if (onModelLoaded) {
-          onModelLoaded(model);
-        }
-
-        setIsLoaded(true);
-      } catch (loadError) {
-        // Model loading failed - log error for debugging
-        console.error('Failed to load character model:', loadError);
-      }
-    };
-
-    loadModel();
-
-    // Cleanup function
-    return () => {
-      if (modelRef.current) {
-        scene.remove(modelRef.current);
-        modelRef.current = null;
-
-        // Also clear the mixer and actions
-        mixerRef.current = null;
-        actionsRef.current = {};
-      }
-
-      // Dispose of the DRACO loader when component unmounts
-      const dracoLoader = new DRACOLoader();
-      dracoLoader.dispose();
-    };
-  }, [scene, onModelLoaded, position, scale]);
-
-  // Method to play a specific animation
-  const playAnimation = (animationName: string, fadeInTime: number = 0.5) => {
-    if (!actionsRef.current[animationName]) {
+  // Method to play a specific animation - wrap in useCallback
+  const playAnimation = useCallback((animationName: string, fadeInTime: number = 0.5) => {
+    if (!actions[animationName]) {
       // Animation not found
       return;
     }
 
     // Fade out all current animations
-    Object.values(actionsRef.current).forEach(action => {
+    Object.values(actions).forEach(action => {
       if (action.isRunning()) {
         action.fadeOut(fadeInTime);
       }
     });
 
     // Fade in the new animation
-    const action = actionsRef.current[animationName];
+    const action = actions[animationName];
     action.reset().fadeIn(fadeInTime).play();
-  };
+  }, [actions]);
 
   // Update the animation mixer in the game loop
   useEffect(() => {
-    if (!scene || !registerUpdate) return;
+    if (!scene || !registerUpdate || !mixer) return;
 
-    // Create animation update function
+    // For animation throttling
+    let lastUpdateTime = 0;
+    const frameSkip = 1; // Update every other frame
+    let frameCount = 0;
+
+    // Create animation update function with throttling
     const update: IdentifiableFunction = (delta: number) => {
-      if (mixerRef.current) {
-        mixerRef.current.update(delta);
+      // Skip update if delta is too large (tab switching, etc)
+      if (delta > 0.1) return;
+      
+      // Throttle animation updates to improve performance
+      frameCount++;
+      if (frameCount % frameSkip !== 0) {
+        return; // Skip this frame
       }
+
+      // Only update animation at 30fps instead of 60fps
+      const currentTime = Date.now();
+      if (currentTime - lastUpdateTime < 33) { // ~30fps (33ms between frames)
+        return;
+      }
+      
+      lastUpdateTime = currentTime;
+      mixer.update(delta);
     };
 
     // Add identifier to the update function
@@ -210,7 +113,7 @@ export default function Character({
       // Unregister the update function when component unmounts
       unregisterUpdate();
     };
-  }, [scene, isLoaded, registerUpdate]);
+  }, [scene, mixer, registerUpdate]);
 
   // Expose the playAnimation method to parent components
   useEffect(() => {
@@ -219,9 +122,7 @@ export default function Character({
     // Attach the playAnimation method to the model for external access
     const model = modelRef.current as THREE.Group & { playAnimation?: typeof playAnimation };
     model.playAnimation = playAnimation;
-
-    // No dependencies needed, as this should run only once after model is loaded
-  }, []);  // Empty dependency array is acceptable here
+  }, [playAnimation]); // Include playAnimation in dependencies
 
   // The component doesn't render anything directly
   return null;
