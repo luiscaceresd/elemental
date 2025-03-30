@@ -29,31 +29,6 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       const THREE = await import('three');
       // const noise2D = createNoise2D(); // Removed: No longer needed for flat world/no mountains
 
-      // --- Lighting ---
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // Soft white light
-      scene.add(ambientLight);
-
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); // White sun light
-      directionalLight.position.set(50, 100, 25); // Position the light source
-      directionalLight.castShadow = true; // Enable shadows
-
-      // Configure shadow properties (optional but recommended)
-      directionalLight.shadow.mapSize.width = 2048;
-      directionalLight.shadow.mapSize.height = 2048;
-      directionalLight.shadow.camera.near = 0.5;
-      directionalLight.shadow.camera.far = 500;
-      directionalLight.shadow.camera.left = -500;
-      directionalLight.shadow.camera.right = 500;
-      directionalLight.shadow.camera.top = 500;
-      directionalLight.shadow.camera.bottom = -500;
-
-      scene.add(directionalLight);
-      // Optional: Add a helper to visualize the light's direction and shadow camera
-      // const helper = new THREE.DirectionalLightHelper(directionalLight, 5);
-      // scene.add(helper);
-      // const shadowHelper = new THREE.CameraHelper(directionalLight.shadow.camera);
-      // scene.add(shadowHelper);
-
       // --- Terrain Geometry (Flat) ---
       const terrainWidth = 1000;
       const terrainHeight = 1000;
@@ -122,7 +97,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
 
       const terrain = new THREE.Mesh(geometry, terrainMaterial);
       terrain.name = 'terrain';
-      terrain.receiveShadow = true; // Terrain receives shadows
+      terrain.receiveShadow = true; // Still allow receiving shadows
       scene.add(terrain);
       console.log("Added textured terrain mesh.");
 
@@ -212,13 +187,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
 
       // --- Cleanup ---
       return () => {
-        // Remove lights
-        scene.remove(ambientLight);
-        scene.remove(directionalLight);
-        // scene.remove(helper); // if helper was added
-        // scene.remove(shadowHelper); // if helper was added
-
-        // Remove other objects
+        // Remove only the objects we added
         scene.remove(terrain);
         scene.remove(sky);
         // No mountains to remove

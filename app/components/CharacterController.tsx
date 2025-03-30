@@ -238,7 +238,7 @@ export default function CharacterController({
         // Update the character model position
         if (characterRef.current) {
           characterRef.current.position.copy(characterPositionRef.current);
-          characterRef.current.position.y -= 0.5; // Lower it slightly for visual alignment
+          // characterRef.current.position.y -= 0.5; // <-- COMMENT OUT this offset
           characterRef.current.visible = true;
         }
 
@@ -285,7 +285,7 @@ export default function CharacterController({
     // If we already have a position, update the model
     if (characterPositionRef.current) {
       model.position.copy(characterPositionRef.current);
-      model.position.y -= 0.5; // Reduced offset for better visibility on terrain
+      // model.position.y -= 0.5; // <-- COMMENT OUT this offset
 
       // Adjust scale if needed - scale up slightly for better visibility
       model.scale.set(1.2, 1.2, 1.2);

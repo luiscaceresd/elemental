@@ -24,7 +24,7 @@ export default function Character({
   scene,
   onModelLoaded,
   position = new THREE.Vector3(0, 0, 0),
-  scale = new THREE.Vector3(1, 1, 1),
+  scale = new THREE.Vector3(1, 1, 1), // Reset scale to 1 for GLB
   registerUpdate
 }: CharacterProps) {
   const modelRef = useRef<THREE.Group | null>(null);
@@ -61,7 +61,7 @@ export default function Character({
         // Load the character model
         const gltf = await new Promise<GLTF>((resolve, reject) => {
           loader.load(
-            '/models/character.glb',
+            '/models/Idle.glb', // <-- Updated model path
             (gltf) => resolve(gltf),
             () => {
               // Progress tracking omitted
@@ -85,9 +85,6 @@ export default function Character({
         model.scale.copy(scale);
 
         // Adjust character orientation to align with movement direction
-        // In standard ThreeJS, forward direction is -Z
-        // But our movement is calculated relative to the camera direction
-        // We rotate 180 degrees to face the character forward properly
         model.rotation.y = Math.PI;
 
         // Ensure all materials and meshes are visible
@@ -121,22 +118,24 @@ export default function Character({
           const mixer = new THREE.AnimationMixer(model);
           mixerRef.current = mixer;
 
-          // Animation names are available but not logged to console
-
           // Create animation actions and store them in the ref
           gltf.animations.forEach((clip: AnimationClip) => {
             const action = mixer.clipAction(clip);
             actionsRef.current[clip.name] = action;
+            console.log(`Loaded animation action: ${clip.name}`); // Log loaded animations
           });
 
-          // Play the idle animation by default if it exists
-          if (actionsRef.current['idle']) {
-            actionsRef.current['idle'].play();
-          } else if (gltf.animations.length > 0) {
-            // If no 'idle' animation, play the first available animation
-            const firstAnimName = gltf.animations[0].name;
-            actionsRef.current[firstAnimName].play();
+          // --- Updated Default Animation Logic ---
+          // Play the first animation found in the file
+          const firstAnimName = gltf.animations[0]?.name;
+          if (firstAnimName && actionsRef.current[firstAnimName]) {
+             console.log(`Autoplaying first animation found: ${firstAnimName}`);
+             actionsRef.current[firstAnimName].play();
+          } else {
+             console.warn("No animations found in the loaded model.");
           }
+          // --- End Updated Logic ---
+
         }
 
         // Notify parent that model is loaded
@@ -172,21 +171,40 @@ export default function Character({
 
   // Method to play a specific animation
   const playAnimation = (animationName: string, fadeInTime: number = 0.5) => {
-    if (!actionsRef.current[animationName]) {
-      // Animation not found
+    // Find the action, potentially case-insensitively or by partial match if needed
+    let targetAction: AnimationAction | null = null;
+    let targetName: string | null = null;
+
+    // Try exact match first (case sensitive based on how they were stored)
+    if (actionsRef.current[animationName]) {
+        targetAction = actionsRef.current[animationName];
+        targetName = animationName;
+    } else {
+        // Fallback: try finding case-insensitive or partial match
+        const lowerCaseName = animationName.toLowerCase();
+        const foundName = Object.keys(actionsRef.current).find(key => key.toLowerCase().includes(lowerCaseName));
+        if (foundName) {
+            targetAction = actionsRef.current[foundName];
+            targetName = foundName;
+            console.warn(`Animation "${animationName}" not found exactly, playing match: "${targetName}"`);
+        }
+    }
+
+    if (!targetAction || !targetName) {
+      console.warn(`Animation "${animationName}" not found.`);
       return;
     }
 
-    // Fade out all current animations
-    Object.values(actionsRef.current).forEach(action => {
-      if (action.isRunning()) {
+    // Fade out all other current animations
+    Object.entries(actionsRef.current).forEach(([name, action]) => {
+        // Use the found targetName for comparison
+      if (name !== targetName && action.isRunning()) {
         action.fadeOut(fadeInTime);
       }
     });
 
     // Fade in the new animation
-    const action = actionsRef.current[animationName];
-    action.reset().fadeIn(fadeInTime).play();
+    targetAction.reset().fadeIn(fadeInTime).play();
   };
 
   // Update the animation mixer in the game loop
@@ -220,8 +238,7 @@ export default function Character({
     const model = modelRef.current as THREE.Group & { playAnimation?: typeof playAnimation };
     model.playAnimation = playAnimation;
 
-    // No dependencies needed, as this should run only once after model is loaded
-  }, []);  // Empty dependency array is acceptable here
+  }, [isLoaded]); // Depend on isLoaded to ensure modelRef.current is set
 
   // The component doesn't render anything directly
   return null;
