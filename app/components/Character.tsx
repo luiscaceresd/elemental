@@ -33,8 +33,12 @@ export default function Character({
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
+    const instanceId = Math.random().toString(36).substring(7); // Unique ID for this instance run
+    console.log(`Character.tsx useEffect START - Instance: ${instanceId}`);
+
     // Check if we already have a model loaded to prevent duplicates
     if (modelRef.current) {
+      console.log(`Character.tsx useEffect - Already loaded, returning. Instance: ${instanceId}`);
       return; // Don't load again if we already have a model
     }
 
@@ -58,95 +62,133 @@ export default function Character({
         const loader = new GLTFLoader();
         loader.setDRACOLoader(dracoLoader);
 
-        // Load the character model
+        // --- Load Base Model (Idle.glb) ---
         const gltf = await new Promise<GLTF>((resolve, reject) => {
           loader.load(
-            '/models/Idle.glb', // <-- Updated model path
+            '/models/idle.glb', // Base model path
             (gltf) => resolve(gltf),
-            () => {
-              // Progress tracking omitted
-            },
-            (error) => {
-              // Log loading errors to help with debugging
-              console.error('Error loading character model:', error);
-              reject(error);
-            }
+            () => { /* Progress */ },
+            (error) => { console.error('Error loading base model:', error); reject(error); }
           );
         });
 
-        // Set up the model
+        // --- Setup Base Model ---
         const model = gltf.scene;
-
-        // Give the model a name for identification
         model.name = 'characterModel';
-
-        // Position and scale the model
         model.position.copy(position);
         model.scale.copy(scale);
-
-        // Adjust character orientation to align with movement direction
         model.rotation.y = Math.PI;
-
-        // Ensure all materials and meshes are visible
-        model.traverse((node) => {
-          if (node instanceof THREE.Mesh) {
-            node.castShadow = true;
-            node.receiveShadow = true;
-            node.visible = true;
-
-            // Check and fix material visibility
-            if (node.material) {
-              const materials = Array.isArray(node.material) ? node.material : [node.material];
-              materials.forEach(material => {
-                material.visible = true;
-                material.transparent = false;
-                material.opacity = 1.0;
-                material.needsUpdate = true;
-              });
-            }
-          }
+        model.traverse((node) => { /* Cast/receive shadow, visibility etc. */
+             if (node instanceof THREE.Mesh) {
+               node.castShadow = true;
+               node.receiveShadow = true;
+               node.visible = true;
+               if (node.material) {
+                 const materials = Array.isArray(node.material) ? node.material : [node.material];
+                 materials.forEach(material => {
+                   material.visible = true;
+                   material.transparent = false;
+                   material.opacity = 1.0;
+                   material.needsUpdate = true;
+                 });
+               }
+             }
         });
-
-        // Store the model in a ref for later use
         modelRef.current = model;
-
-        // Add the model to the scene
         scene.add(model);
 
-        // Set up animations if they exist
+        // Inside loading logic, *after* model is created:
+        console.log(`Character.tsx - Model Loaded. Instance: ${instanceId}, UUID: ${model.uuid}`);
+
+        // --- Setup Animation Mixer ---
+        const mixer = new THREE.AnimationMixer(model);
+        mixerRef.current = mixer;
+        actionsRef.current = {}; // Clear previous actions
+
+        // --- Load Embedded Animations (from Idle.glb) ---
+        let baseModelDefaultAnimName: string | null = null;
         if (gltf.animations && gltf.animations.length > 0) {
-          const mixer = new THREE.AnimationMixer(model);
-          mixerRef.current = mixer;
-
-          // Create animation actions and store them in the ref
-          gltf.animations.forEach((clip: AnimationClip) => {
-            const action = mixer.clipAction(clip);
-            actionsRef.current[clip.name] = action;
-            console.log(`Loaded animation action: ${clip.name}`); // Log loaded animations
-          });
-
-          // --- Updated Default Animation Logic ---
-          // Play the first animation found in the file
-          const firstAnimName = gltf.animations[0]?.name;
-          if (firstAnimName && actionsRef.current[firstAnimName]) {
-             console.log(`Autoplaying first animation found: ${firstAnimName}`);
-             actionsRef.current[firstAnimName].play();
-          } else {
-             console.warn("No animations found in the loaded model.");
-          }
-          // --- End Updated Logic ---
-
+            gltf.animations.forEach((clip: AnimationClip, index: number) => {
+                const action = mixer.clipAction(clip);
+                actionsRef.current[clip.name] = action; // Store using original clip name
+                console.log(`Loaded embedded animation action: ${clip.name}`);
+                if (index === 0) {
+                    baseModelDefaultAnimName = clip.name; // Store the name of the first embedded animation
+                }
+            });
         }
 
-        // Notify parent that model is loaded
+        // --- Load External Animations ---
+        const externalAnimationPaths = [
+            '/models/walking.glb',
+            '/models/running.glb',
+            '/models/jumping.glb'
+        ];
+
+        const loadAnimation = async (path: string): Promise<[string, AnimationClip] | null> => {
+            try {
+                const animGltf = await loader.loadAsync(path);
+                if (animGltf.animations && animGltf.animations.length > 0) {
+                    const clip = animGltf.animations[0];
+                    // Extract name from path (e.g., walking.glb -> walking)
+                    const name = path.split('/').pop()?.split('.')[0]?.toLowerCase() || clip.name; // Fallback to clip name
+                    return [name, clip];
+                }
+                console.warn(`No animation clip found in ${path}`);
+            } catch (error) {
+                console.error(`Failed to load animation from ${path}:`, error);
+            }
+            return null;
+        };
+
+        const loadedAnimations = await Promise.all(externalAnimationPaths.map(loadAnimation));
+
+        // Add external animations to actionsRef
+        loadedAnimations.forEach(result => {
+            if (result) {
+                const [name, clip] = result;
+                // Store using the derived name (walking, running, jumping)
+                // Check for conflicts with embedded animations
+                if (!actionsRef.current[name]) {
+                    actionsRef.current[name] = mixer.clipAction(clip);
+                    console.log(`Loaded external animation action: ${name}`);
+                } else {
+                     console.warn(`External animation name "${name}" conflicts with an existing action. Skipping.`);
+                }
+            }
+        });
+
+        // --- Autoplay Default Animation ---
+        console.log("Available animation actions:", Object.keys(actionsRef.current));
+        let actionToPlay: string | null = null;
+        const idleActionName = Object.keys(actionsRef.current).find(name => name.toLowerCase().includes('idle') || name === baseModelDefaultAnimName); // Try 'idle' or the base model's anim
+
+        if (idleActionName) {
+            actionToPlay = idleActionName;
+            console.log(`Found idle/base animation action: "${actionToPlay}". Setting as default.`);
+        } else if (Object.keys(actionsRef.current).length > 0) {
+            actionToPlay = Object.keys(actionsRef.current)[0];
+             console.log(`Could not find idle/base animation. Using first available action as default: "${actionToPlay}".`);
+        }
+
+        if (actionToPlay && actionsRef.current[actionToPlay]) {
+            actionsRef.current[actionToPlay].play();
+             console.log(`Autoplaying default animation: "${actionToPlay}"`);
+        } else {
+            console.warn("No animations available to autoplay.");
+        }
+        // --- End Autoplay Logic ---
+
+
+        // --- Final Setup ---
         if (onModelLoaded) {
+          console.log(`Character.tsx - Calling onModelLoaded. Instance: ${instanceId}, UUID: ${model.uuid}`);
           onModelLoaded(model);
         }
-
         setIsLoaded(true);
+
       } catch (loadError) {
-        // Model loading failed - log error for debugging
-        console.error('Failed to load character model:', loadError);
+        console.error('Failed during model or animation loading:', loadError);
       }
     };
 
@@ -154,7 +196,11 @@ export default function Character({
 
     // Cleanup function
     return () => {
+      // Use the specific instanceId captured by this useEffect closure
+      const currentModelUUID = modelRef.current?.uuid;
+      console.log(`Character.tsx useEffect CLEANUP - Instance: ${instanceId}, Model UUID: ${currentModelUUID}`);
       if (modelRef.current) {
+        console.log(`Character.tsx CLEANUP - Removing model UUID: ${modelRef.current.uuid}`);
         scene.remove(modelRef.current);
         modelRef.current = null;
 
@@ -167,7 +213,7 @@ export default function Character({
       const dracoLoader = new DRACOLoader();
       dracoLoader.dispose();
     };
-  }, [scene, onModelLoaded, position, scale]);
+  }, [scene, onModelLoaded, position, scale, registerUpdate]);
 
   // Method to play a specific animation
   const playAnimation = (animationName: string, fadeInTime: number = 0.5) => {

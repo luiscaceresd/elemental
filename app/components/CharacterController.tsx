@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Character from './Character';
@@ -46,6 +46,13 @@ export default function CharacterController({
   // Track last ground state for debugging
   const lastGroundStateRef = useRef<boolean>(true);
 
+  // --- Add State/Memo for Stable Props ---
+  // Use useMemo for the scale vector to prevent recreation
+  const characterScale = useMemo(() => new THREE.Vector3(1.2, 1.2, 1.2), []);
+  // Use state for the initial position to ensure a stable reference if ref is null
+  const [initialPosition] = useState(() => new THREE.Vector3(0, 1, 5));
+  // ------------------------------------
+
   // This useEffect is necessary for THREE.js integration and physics
   useEffect(() => {
     // Import Three.js dynamically
@@ -54,7 +61,8 @@ export default function CharacterController({
 
       // Initialize references that need THREE
       velocityRef.current = new THREE.Vector3(0, 0, 0);
-      characterPositionRef.current = new THREE.Vector3(0, 1, 5);
+       // Use the state variable for initial physics position
+      characterPositionRef.current = initialPosition.clone();
 
       // Remove any existing colliders to prevent duplicates
       const existingCollider = scene.getObjectByName('characterCollider');
@@ -67,7 +75,8 @@ export default function CharacterController({
       const characterBody = new CANNON.Body({
         mass: 5, // Character has mass (dynamic object)
         shape: characterShape,
-        position: new CANNON.Vec3(0, 3, 5), // Initial position - start a bit higher to ensure it doesn't spawn inside the ground
+        // position: new CANNON.Vec3(0, 3, 5), // Initial position - start a bit higher to ensure it doesn't spawn inside the ground
+        position: new CANNON.Vec3(initialPosition.x, initialPosition.y + 2, initialPosition.z), // Adjust initial physics pos based on state
         material: new CANNON.Material("characterMaterial"),
         linearDamping: 0, // No damping for frictionless movement
         angularDamping: 0.99, // Prevent excessive rotation
@@ -276,19 +285,22 @@ export default function CharacterController({
     };
 
     setupCharacter();
-  }, [scene, keysRef, registerUpdate, camera, onPositionUpdate, world]);
+  }, [scene, keysRef, registerUpdate, camera, onPositionUpdate, world, initialPosition]);
 
-  // Handle character model loaded from the Character component
-  const handleModelLoaded = (model: THREE.Group) => {
+  // --- Wrap handleModelLoaded in useCallback ---
+  const handleModelLoaded = useCallback((model: THREE.Group) => {
+    // Log the UUID of the model received by the controller
+    console.log(`CharacterController handleModelLoaded: Received model UUID: ${model.uuid}`);
     characterRef.current = model;
 
     // If we already have a position, update the model
     if (characterPositionRef.current) {
+      console.log(`CharacterController handleModelLoaded: Applying initial position/scale to UUID: ${model.uuid}`);
       model.position.copy(characterPositionRef.current);
-      // model.position.y -= 0.5; // <-- COMMENT OUT this offset
+      // model.position.y -= 0.5; // Keep commented out
 
-      // Adjust scale if needed - scale up slightly for better visibility
-      model.scale.set(1.2, 1.2, 1.2);
+      // Use the stable scale vector
+      model.scale.copy(characterScale);
 
       // Ensure model and all its children are visible
       model.visible = true;
@@ -310,15 +322,20 @@ export default function CharacterController({
           }
         }
       });
+    } else {
+       console.log(`CharacterController handleModelLoaded: No initial characterPositionRef for UUID: ${model.uuid}`);
     }
-  };
+     // Add dependencies for useCallback
+  }, [characterScale]); // Dependency on characterScale ensures scale is updated if it ever changes (it won't here)
+  // ------------------------------------------
 
   return (
     <Character
       scene={scene}
-      onModelLoaded={handleModelLoaded}
-      position={characterPositionRef.current || new THREE.Vector3(0, 1, 5)}
-      scale={new THREE.Vector3(1.2, 1.2, 1.2)} // Increased scale for better visibility
+      onModelLoaded={handleModelLoaded} // Pass the memoized callback
+      // Pass stable position reference (ref should be set by the time Character mounts ideally)
+      position={characterPositionRef.current ?? initialPosition}
+      scale={characterScale} // Pass the stable scale vector
       registerUpdate={registerUpdate}
     />
   );
