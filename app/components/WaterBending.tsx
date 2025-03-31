@@ -1,5 +1,4 @@
 'use client';
-/* eslint-disable @typescript-eslint/no-unused-vars */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';

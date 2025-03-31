@@ -23,7 +23,6 @@ function Joystick({
 }) {
   const joystickZoneRef = useRef<HTMLDivElement>(null);
   const nippleInstanceRef = useRef<unknown>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
@@ -308,18 +307,10 @@ function WaterCollectionOverlay({
 
 // New camera control area component
 function CameraControlArea({ 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  isPortrait,
-  onWaterBendStart,
-  onWaterBendEnd
+  isPortrait
 }: { 
   isPortrait: boolean;
-  onWaterBendStart?: () => void;
-  onWaterBendEnd?: () => void;
 }) {
-  const [isCollectingWater, setIsCollectingWater] = useState(false);
-  const longPressTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
   const cameraControlStyle = {
     position: 'absolute',
     top: '0',
@@ -330,46 +321,11 @@ function CameraControlArea({
     touchAction: 'none', // Prevent default touch actions like scrolling
   } as const;
 
-  // Handle both camera and water collection events
-  const handleTouchStart = () => {
-    // Start water collection after holding for a short period
-    longPressTimeoutRef.current = setTimeout(() => {
-      setIsCollectingWater(true);
-      if (onWaterBendStart) onWaterBendStart();
-    }, 200); // Short delay to differentiate between camera movement and water collection
-  };
-  
-  const handleTouchEnd = () => {
-    // Clear the timeout if touch ends before water collection starts
-    if (longPressTimeoutRef.current) {
-      clearTimeout(longPressTimeoutRef.current);
-      longPressTimeoutRef.current = null;
-    }
-    
-    // Stop water collection if it was active
-    if (isCollectingWater) {
-      setIsCollectingWater(false);
-      if (onWaterBendEnd) onWaterBendEnd();
-    }
-  };
-  
-  // Clean up timeouts if component unmounts
-  useEffect(() => {
-    return () => {
-      if (longPressTimeoutRef.current) {
-        clearTimeout(longPressTimeoutRef.current);
-      }
-    };
-  }, []);
-
   return (
     <div 
       id="camera-control-area" 
       style={cameraControlStyle} 
       className="hide-when-paused"
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onTouchCancel={handleTouchEnd}
     />
   );
 }
@@ -383,12 +339,6 @@ export default function MobileControls({
   onWaterBendEnd = () => {} // Default empty function
 }: MobileControlsProps) {
   const [isPortrait, setIsPortrait] = useState(false);
-  const joystickRef = useRef<HTMLDivElement>(null);
-  const jumpButtonRef = useRef<HTMLDivElement>(null);
-  const shootButtonRef = useRef<HTMLDivElement>(null);
-  const waterBendButtonRef = useRef<HTMLDivElement>(null);
-  const [isVisible, setIsVisible] = useState(true); // Always visible initially
-  const interactionTimerRef = useRef<number | null>(null);
 
   // Check if we're in portrait mode for responsive positioning
   useEffect(() => {
@@ -402,7 +352,7 @@ export default function MobileControls({
   }, []);
 
   return (
-    <>
+    <> 
       {/* Water collection overlay (lowest z-index) */}
       <WaterCollectionOverlay 
         onWaterBendStart={onWaterBendStart}
@@ -412,8 +362,6 @@ export default function MobileControls({
       {/* Camera control area - for right side of screen */}
       <CameraControlArea 
         isPortrait={isPortrait} 
-        onWaterBendStart={onWaterBendStart}
-        onWaterBendEnd={onWaterBendEnd}
       />
 
       {/* Joystick for movement - directly in the layout */}
@@ -442,28 +390,6 @@ export default function MobileControls({
         position="left"
         isPortrait={isPortrait}
       />
-
-      <div
-        ref={waterBendButtonRef}
-        className="hide-when-paused"
-        style={{
-          position: 'absolute',
-          top: isPortrait ? '100px' : '80px',
-          right: isPortrait ? '30px' : '30px',
-          width: '100px',
-          height: '100px',
-          borderRadius: '50%',
-          background: 'rgba(0, 120, 255, 0.8)',
-          zIndex: 1000,
-          cursor: 'pointer',
-          touchAction: 'manipulation',
-          onTouchStartCapture={(e) => handleInteractionStart(e.target as Element, e)}
-          onTouchEndCapture={(e) => handleInteractionEnd(e.target as Element, e)}
-        >
-          {/* Remove unused eslint-disable directive */}
-          {/* <button>DEBUG BUTTON (DO NOT REMOVE YET)</button> */}
-        </div>
-      </div>
     </>
   );
 } 

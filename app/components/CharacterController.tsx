@@ -47,7 +47,7 @@ export default function CharacterController({
 
   // --- Add State/Memo for Stable Props ---
   // Restore useMemo for production build stability
-  const characterScale = useMemo(() => new THREE.Vector3(1.2, 1.2, 1.2), []); 
+  const characterScale = useMemo(() => new THREE.Vector3(3, 3, 3), []); 
   // console.log('CharacterController Render: characterScale =', characterScale.x, characterScale.y, characterScale.z); // Keep commented for build
   // Use state for the initial position to ensure a stable reference if ref is null
   const [initialPosition] = useState(() => new THREE.Vector3(0, 1, 5));
@@ -323,10 +323,7 @@ export default function CharacterController({
     if (characterPositionRef.current) {
       console.log(`CharacterController handleModelLoaded: Applying initial position/scale to UUID: ${model.uuid}`);
       model.position.copy(characterPositionRef.current);
-      // model.position.y -= 0.5; // Keep commented out
-
-      // Use the stable scale vector
-      model.scale.copy(characterScale);
+      // model.position.y -= 0.5; // Apply offset if needed, currently commented
 
       // Ensure model and all its children are visible
       model.visible = true;
