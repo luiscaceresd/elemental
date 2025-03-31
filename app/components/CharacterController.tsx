@@ -37,9 +37,7 @@ export default function CharacterController({
   const onGroundRef = useRef(true);
   // Create a ref to store character position for external components to access
   const characterPositionRef = useRef<THREE.Vector3 | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const lastTerrainHeightRef = useRef<number>(0);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const movingRef = useRef<boolean>(false);
   // Add Cannon.js body reference
   const characterBodyRef = useRef<CANNON.Body | null>(null);

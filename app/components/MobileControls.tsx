@@ -383,6 +383,12 @@ export default function MobileControls({
   onWaterBendEnd = () => {} // Default empty function
 }: MobileControlsProps) {
   const [isPortrait, setIsPortrait] = useState(false);
+  const joystickRef = useRef<HTMLDivElement>(null);
+  const jumpButtonRef = useRef<HTMLDivElement>(null);
+  const shootButtonRef = useRef<HTMLDivElement>(null);
+  const waterBendButtonRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(true); // Always visible initially
+  const interactionTimerRef = useRef<number | null>(null);
 
   // Check if we're in portrait mode for responsive positioning
   useEffect(() => {
@@ -436,6 +442,28 @@ export default function MobileControls({
         position="left"
         isPortrait={isPortrait}
       />
+
+      <div
+        ref={waterBendButtonRef}
+        className="hide-when-paused"
+        style={{
+          position: 'absolute',
+          top: isPortrait ? '100px' : '80px',
+          right: isPortrait ? '30px' : '30px',
+          width: '100px',
+          height: '100px',
+          borderRadius: '50%',
+          background: 'rgba(0, 120, 255, 0.8)',
+          zIndex: 1000,
+          cursor: 'pointer',
+          touchAction: 'manipulation',
+          onTouchStartCapture={(e) => handleInteractionStart(e.target as Element, e)}
+          onTouchEndCapture={(e) => handleInteractionEnd(e.target as Element, e)}
+        >
+          {/* Remove unused eslint-disable directive */}
+          {/* <button>DEBUG BUTTON (DO NOT REMOVE YET)</button> */}
+        </div>
+      </div>
     </>
   );
 } 

@@ -194,7 +194,6 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       // Animation loop with clock for delta time
       const clock = new THREE.Clock();
       let animationFrameId: number;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       let isPaused = gameState === 'paused';
       
       // Store last known game state to detect changes
