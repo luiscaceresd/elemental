@@ -45,10 +45,12 @@ export default function CharacterController({
   const characterBodyRef = useRef<CANNON.Body | null>(null);
   // Track last ground state for debugging
   const lastGroundStateRef = useRef<boolean>(true);
+  const currentAnimationRef = useRef<string | null>(null);
 
   // --- Add State/Memo for Stable Props ---
-  // Use useMemo for the scale vector to prevent recreation
-  const characterScale = useMemo(() => new THREE.Vector3(1.2, 1.2, 1.2), []);
+  // Restore useMemo for production build stability
+  const characterScale = useMemo(() => new THREE.Vector3(1.2, 1.2, 1.2), []); 
+  // console.log('CharacterController Render: characterScale =', characterScale.x, characterScale.y, characterScale.z); // Keep commented for build
   // Use state for the initial position to ensure a stable reference if ref is null
   const [initialPosition] = useState(() => new THREE.Vector3(0, 1, 5));
   // ------------------------------------
@@ -219,18 +221,44 @@ export default function CharacterController({
 
         // Jump if space is pressed and character is on the ground
         if (keys.current[' '] && onGroundRef.current) {
-          characterBodyRef.current.velocity.y = 6; // Reduced from 10 to 6
+          characterBodyRef.current.velocity.y = 5; // Reduced from 6 to 5
           onGroundRef.current = false; // Immediately set ground state to false
           
           // Add a small upward impulse for more responsive jumping
           characterBodyRef.current.applyImpulse(
-            new CANNON.Vec3(0, 25, 0), // Reduced from 50 to 25
+            new CANNON.Vec3(0, 15, 0), // Reduced from 25 to 15
             characterBodyRef.current.position // Apply at center of mass
           );
           
           // Removed console.log
         }
         
+        // --- Animation State Machine ---
+        let nextAnimation = 'idle'; // Default to idle
+        const characterBody = characterBodyRef.current; // Alias for easier access
+        
+        if (!onGroundRef.current) {
+            nextAnimation = 'jumping';
+        } else if (isMoving) {
+            // Calculate horizontal speed
+            const speed = new THREE.Vector3(characterBody.velocity.x, 0, characterBody.velocity.z).length();
+            if (speed > 15) { // Adjust threshold as needed for running
+                nextAnimation = 'running';
+            } else {
+                nextAnimation = 'walking';
+            }
+        }
+        
+        // Check if the character model exists and has the playAnimation method
+        const characterModel = characterRef.current as (THREE.Group & { playAnimation?: (name: string, fade: number) => void }) | null;
+
+        if (characterModel?.playAnimation && nextAnimation !== currentAnimationRef.current) {
+            console.log(`Switching animation from ${currentAnimationRef.current} to ${nextAnimation}`);
+            characterModel.playAnimation(nextAnimation, 0.3); // Play with fade
+            currentAnimationRef.current = nextAnimation;
+        }
+        // --- End Animation State Machine ---
+
         // Reset ground state when falling
         if (characterBodyRef.current.velocity.y < -1) {
           onGroundRef.current = false;
@@ -247,7 +275,7 @@ export default function CharacterController({
         // Update the character model position
         if (characterRef.current) {
           characterRef.current.position.copy(characterPositionRef.current);
-          // characterRef.current.position.y -= 0.5; // <-- COMMENT OUT this offset
+          characterRef.current.position.y -= 1; // <-- UNCOMMENT this offset
           characterRef.current.visible = true;
         }
 
@@ -326,7 +354,7 @@ export default function CharacterController({
        console.log(`CharacterController handleModelLoaded: No initial characterPositionRef for UUID: ${model.uuid}`);
     }
      // Add dependencies for useCallback
-  }, [characterScale]); // Dependency on characterScale ensures scale is updated if it ever changes (it won't here)
+  }, [characterScale]); // Add characterScale to dependencies
   // ------------------------------------------
 
   return (

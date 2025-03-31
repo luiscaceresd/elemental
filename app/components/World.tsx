@@ -168,7 +168,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       setPondPositions(pondsList);
 
       // --- Terrain Height Function (now always returns 0) ---
-      function getTerrainHeightAt(x: number, z_pos: number, width: number, height: number, segments: number, heightmapData: Float32Array): number {
+      function getTerrainHeightAt(x: number, z_pos: number, width: number, height: number): number {
         // Optimization: Since the heightmap is guaranteed flat (all 0s),
         // we can just return 0 directly, unless bounds checking is desired.
         const normalizedX = (x + width / 2) / width;
@@ -182,7 +182,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
         return 0;
       }
       // @ts-expect-error - Property 'getTerrainHeight' does not exist on Window interface
-      window.getTerrainHeight = (x: number, z_pos: number) => { return getTerrainHeightAt(x, z_pos, terrainWidth, terrainHeight, terrainSegments, heightmap); };
+      window.getTerrainHeight = (x: number, z_pos: number) => { return getTerrainHeightAt(x, z_pos, terrainWidth, terrainHeight); };
 
 
       // --- Cleanup ---

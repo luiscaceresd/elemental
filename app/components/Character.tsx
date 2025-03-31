@@ -23,9 +23,10 @@ export default function Character({
   scene,
   onModelLoaded,
   position = new THREE.Vector3(0, 0, 0),
-  scale = new THREE.Vector3(1, 1, 1),
+  scale = new THREE.Vector3(5, 5, 5),
   registerUpdate,
 }: CharacterProps) {
+  console.log('Character Render: Received scale prop:', scale?.x, scale?.y, scale?.z);
   const modelRef = useRef<THREE.Group | null>(null);
   const mixerRef = useRef<AnimationMixer | null>(null);
   const actionsRef = useRef<{ [key: string]: AnimationAction }>({});
@@ -188,6 +189,14 @@ export default function Character({
     const model = modelRef.current as THREE.Group & { playAnimation?: typeof playAnimation };
     model.playAnimation = playAnimation;
   }, [isLoaded]);
+
+  // Add this useEffect to react to scale prop changes
+  useEffect(() => {
+    if (modelRef.current && scale) {
+      console.log('Character.tsx: Scale useEffect - Applying new scale:', scale.x, scale.y, scale.z);
+      modelRef.current.scale.copy(scale);
+    }
+  }, [scale]); // Re-run this effect if the scale prop changes
 
   return null;
 }

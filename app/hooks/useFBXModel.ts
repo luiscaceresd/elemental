@@ -80,15 +80,14 @@ export function useFBXModel({
 
         scene.add(baseGltf);
 
-        // Setup mixer
-        const mixer = new THREE.AnimationMixer(baseGltf);
-        mixerRef.current = mixer;
+        // Setup mixer directly on the ref
+        mixerRef.current = new THREE.AnimationMixer(baseGltf);
 
         // Add base model's animations (e.g., the idle animation in Idle.fbx)
         baseGltf.animations.forEach(clip => {
             const name = clip.name.toLowerCase() || baseModelPath.split('/').pop()?.split('.')[0]?.toLowerCase() || 'base_anim';
-             if (!actionsRef.current[name]) { // Avoid overwriting if name collision
-                 actionsRef.current[name] = mixer.clipAction(clip);
+             if (!actionsRef.current[name] && mixerRef.current) { // Check if mixerRef.current exists
+                 actionsRef.current[name] = mixerRef.current.clipAction(clip);
                  console.log(`Loaded base animation: ${name}`);
              }
         });
@@ -96,17 +95,17 @@ export function useFBXModel({
 
         // Load additional animations concurrently
         const loadedAnimations = await Promise.all(
-            animationPaths.map(path => loadAnimation(path, mixer))
+            animationPaths.map(path => mixerRef.current ? loadAnimation(path, mixerRef.current) : Promise.resolve(null)) // Check mixerRef.current
         );
 
         if (!isMounted) return; // Check mount status after async load
 
         // Add loaded animations to actions ref
         loadedAnimations.forEach(result => {
-          if (result) {
+          if (result && mixerRef.current) { // Check if mixerRef.current exists
             const [name, clip] = result;
             if (!actionsRef.current[name]) { // Avoid overwriting if name collision
-                 actionsRef.current[name] = mixer.clipAction(clip);
+                 actionsRef.current[name] = mixerRef.current.clipAction(clip);
                  console.log(`Loaded additional animation: ${name}`);
             } else {
                 console.warn(`Animation name collision: "${name}" from ${baseModelPath} might be overwritten by an external animation file.`)
@@ -130,7 +129,8 @@ export function useFBXModel({
 
 
         // Register mixer update loop
-        if (registerUpdate) {
+        if (registerUpdate && mixerRef.current) { // Check if mixerRef.current exists
+          const mixer = mixerRef.current; // Assign to local const for type narrowing
           const updateMixer: IdentifiableFunction = (delta) => mixer.update(delta);
           updateMixer._id = `${modelName}Animation`;
           unregisterUpdateRef.current = registerUpdate(updateMixer); // Store unregister function

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { AnimationMixer, AnimationAction, AnimationClip } from 'three';
 
@@ -100,18 +100,18 @@ export function useGLTFModel({
 
         scene.add(modelRef.current);
 
+        // Setup mixer directly on the ref
+        mixerRef.current = new THREE.AnimationMixer(modelRef.current);
+
         // Setup animations
         if (gltf.animations && gltf.animations.length > 0) {
-          const mixer = new THREE.AnimationMixer(modelRef.current);
-          mixerRef.current = mixer;
-
           let baseModelDefaultAnimName: string | null = null; // Variable to store the name of the first embedded animation
 
           // Add animations embedded in the base model
           gltf.animations.forEach((clip: AnimationClip, index: number) => {
             const name = clip.name.toLowerCase();
-            if (!actionsRef.current[name]) {
-                actionsRef.current[name] = mixer.clipAction(clip);
+            if (!actionsRef.current[name] && mixerRef.current) {
+                actionsRef.current[name] = mixerRef.current.clipAction(clip);
                 console.log(`Loaded embedded animation: ${name}`);
                 if (index === 0) { // Store the name of the *first* embedded animation
                     baseModelDefaultAnimName = name;
@@ -121,17 +121,17 @@ export function useGLTFModel({
 
           // Load additional animations from separate GLB files
           const loadedAnimations = await Promise.all(
-              animationPaths.map(path => loadAnimation(path, mixer))
+              animationPaths.map(path => mixerRef.current ? loadAnimation(path, mixerRef.current) : Promise.resolve(null))
           );
 
           if (!isMounted) return;
 
           // Add loaded external animations to actions ref
           loadedAnimations.forEach(result => {
-            if (result) {
+            if (result && mixerRef.current) {
               const [name, clip] = result;
               if (!actionsRef.current[name]) { // Avoid overwriting
-                   actionsRef.current[name] = mixer.clipAction(clip);
+                   actionsRef.current[name] = mixerRef.current.clipAction(clip);
                    console.log(`Loaded external animation: ${name}`);
               } else {
                   console.warn(`Animation name collision: "${name}" from base model ${modelPath} conflicts with external file. External animation ignored.`)
@@ -173,7 +173,8 @@ export function useGLTFModel({
 
         // Register update loop
         if (registerUpdate && mixerRef.current) {
-            const updateMixer: IdentifiableFunction = (delta) => mixerRef.current?.update(delta);
+            const mixer = mixerRef.current;
+            const updateMixer: IdentifiableFunction = (delta) => mixer.update(delta);
             updateMixer._id = `${modelName}Animation`;
             unregisterUpdateRef.current = registerUpdate(updateMixer);
         }
