@@ -115,12 +115,16 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       renderer.domElement.addEventListener('contextmenu', preventContextMenu);
 
       // Studio Ghibli inspired lighting
-      // Soft ambient light
-      const ambientLight = new THREE.AmbientLight(0x404040, 1);
-      scene.add(ambientLight);
+      // Remove AmbientLight
+      // const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+      // scene.add(ambientLight);
+
+      // Add HemisphereLight for softer ambient lighting
+      const hemisphereLight = new THREE.HemisphereLight(0xADD8E6, 0x404040, 1.8); // Increased intensity from 1.5 to 1.8
+      scene.add(hemisphereLight);
 
       // White main light for accurate water color rendering
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8); // White light for truer colors
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.1); // Increased intensity from 1.0 to 1.1
       directionalLight.position.set(10, 20, 10);
       directionalLight.castShadow = true; // Enable shadows
 
@@ -137,7 +141,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       scene.add(directionalLight);
 
       // Add secondary fill light for more depth
-      const fillLight = new THREE.DirectionalLight(0xE6D8AD, 0.3); // Warm fill light
+      const fillLight = new THREE.DirectionalLight(0xE6D8AD, 0.4); // Reduced intensity back to 0.4
       fillLight.position.set(-5, 10, -10);
       scene.add(fillLight);
 
@@ -190,7 +194,6 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       // Animation loop with clock for delta time
       const clock = new THREE.Clock();
       let animationFrameId: number;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       let isPaused = gameState === 'paused';
       
       // Store last known game state to detect changes
@@ -260,7 +263,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         if (cleanupFn) cleanupFn();
       });
     };
-  }, []); // Remove gameState from the dependency array to prevent recreation of the scene
+  }, [gameState]);
 
   // Function to register update functions from child components - this is memoized
   const registerUpdate = useCallback((updateFn: IdentifiableFunction) => {

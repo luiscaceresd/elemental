@@ -7,9 +7,8 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { AnimationMixer, AnimationAction, AnimationClip } from 'three';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader';
 
-// Add a type for identifiable functions as used in other components
 type IdentifiableFunction = ((delta: number) => void) & {
-  _id?: string
+  _id?: string;
 };
 
 interface CharacterProps {
@@ -24,83 +23,62 @@ export default function Character({
   scene,
   onModelLoaded,
   position = new THREE.Vector3(0, 0, 0),
-  scale = new THREE.Vector3(1, 1, 1),
-  registerUpdate
+  scale = new THREE.Vector3(5, 5, 5),
+  registerUpdate,
 }: CharacterProps) {
+  console.log('Character Render: Received scale prop:', scale?.x, scale?.y, scale?.z);
   const modelRef = useRef<THREE.Group | null>(null);
   const mixerRef = useRef<AnimationMixer | null>(null);
   const actionsRef = useRef<{ [key: string]: AnimationAction }>({});
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    // Check if we already have a model loaded to prevent duplicates
+    const instanceId = Math.random().toString(36).substring(7);
+    console.log(`Character.tsx useEffect START - Instance: ${instanceId}`);
+
     if (modelRef.current) {
-      return; // Don't load again if we already have a model
+      console.log(`Character.tsx useEffect - Already loaded, returning. Instance: ${instanceId}`);
+      return;
     }
 
     const loadModel = async () => {
       try {
-        // Remove any existing character models from the scene
-        scene.children.forEach(child => {
+        scene.children.forEach((child) => {
           if (child.name === 'characterModel') {
             scene.remove(child);
           }
         });
 
-        // Create DRACOLoader
         const dracoLoader = new DRACOLoader();
-        // Specify the path to the Draco decoder (using the default from three.js CDN)
         dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
-        // Optional: For better performance, specify that we want to use JS decoder
         dracoLoader.setDecoderConfig({ type: 'js' });
 
-        // Create GLTFLoader and attach DRACOLoader
         const loader = new GLTFLoader();
         loader.setDRACOLoader(dracoLoader);
 
-        // Load the character model
         const gltf = await new Promise<GLTF>((resolve, reject) => {
           loader.load(
-            '/models/character.glb',
+            '/models/character.glb', // Your combined animation model
             (gltf) => resolve(gltf),
-            () => {
-              // Progress tracking omitted
-            },
-            (error) => {
-              // Log loading errors to help with debugging
-              console.error('Error loading character model:', error);
-              reject(error);
-            }
+            () => { /* Progress */ },
+            (error) => { console.error('Error loading model:', error); reject(error); }
           );
         });
 
-        // Set up the model
         const model = gltf.scene;
-
-        // Give the model a name for identification
         model.name = 'characterModel';
-
-        // Position and scale the model
         model.position.copy(position);
         model.scale.copy(scale);
-
-        // Adjust character orientation to align with movement direction
-        // In standard ThreeJS, forward direction is -Z
-        // But our movement is calculated relative to the camera direction
-        // We rotate 180 degrees to face the character forward properly
         model.rotation.y = Math.PI;
 
-        // Ensure all materials and meshes are visible
         model.traverse((node) => {
           if (node instanceof THREE.Mesh) {
             node.castShadow = true;
             node.receiveShadow = true;
             node.visible = true;
-
-            // Check and fix material visibility
             if (node.material) {
               const materials = Array.isArray(node.material) ? node.material : [node.material];
-              materials.forEach(material => {
+              materials.forEach((material) => {
                 material.visible = true;
                 material.transparent = false;
                 material.opacity = 1.0;
@@ -110,119 +88,115 @@ export default function Character({
           }
         });
 
-        // Store the model in a ref for later use
         modelRef.current = model;
-
-        // Add the model to the scene
         scene.add(model);
 
-        // Set up animations if they exist
+        const mixer = new THREE.AnimationMixer(model);
+        mixerRef.current = mixer;
+        actionsRef.current = {};
+
         if (gltf.animations && gltf.animations.length > 0) {
-          const mixer = new THREE.AnimationMixer(model);
-          mixerRef.current = mixer;
-
-          // Animation names are available but not logged to console
-
-          // Create animation actions and store them in the ref
           gltf.animations.forEach((clip: AnimationClip) => {
+            const name = clip.name.toLowerCase();
             const action = mixer.clipAction(clip);
-            actionsRef.current[clip.name] = action;
+            actionsRef.current[name] = action;
+            console.log(`Loaded animation action: ${name}`);
           });
-
-          // Play the idle animation by default if it exists
-          if (actionsRef.current['idle']) {
-            actionsRef.current['idle'].play();
-          } else if (gltf.animations.length > 0) {
-            // If no 'idle' animation, play the first available animation
-            const firstAnimName = gltf.animations[0].name;
-            actionsRef.current[firstAnimName].play();
-          }
         }
 
-        // Notify parent that model is loaded
+        console.log('Available animation actions:', Object.keys(actionsRef.current));
+
+        if (actionsRef.current.idle) {
+          actionsRef.current.idle.play();
+          console.log('Autoplaying default animation: "idle"');
+        } else if (Object.keys(actionsRef.current).length > 0) {
+          const firstActionName = Object.keys(actionsRef.current)[0];
+          actionsRef.current[firstActionName].play();
+          console.warn(`Could not find 'idle'. Using fallback action as default: "${firstActionName}".`);
+        } else {
+          console.warn('No animations available to autoplay.');
+        }
+
         if (onModelLoaded) {
+          console.log(`Character.tsx - Calling onModelLoaded. Instance: ${instanceId}, UUID: ${model.uuid}`);
           onModelLoaded(model);
         }
-
         setIsLoaded(true);
       } catch (loadError) {
-        // Model loading failed - log error for debugging
-        console.error('Failed to load character model:', loadError);
+        console.error('Failed during model loading:', loadError);
       }
     };
 
     loadModel();
 
-    // Cleanup function
     return () => {
+      const currentModelUUID = modelRef.current?.uuid;
+      console.log(`Character.tsx useEffect CLEANUP - Instance: ${instanceId}, Model UUID: ${currentModelUUID}`);
       if (modelRef.current) {
+        console.log(`Character.tsx CLEANUP - Removing model UUID: ${modelRef.current.uuid}`);
         scene.remove(modelRef.current);
         modelRef.current = null;
-
-        // Also clear the mixer and actions
         mixerRef.current = null;
         actionsRef.current = {};
       }
-
-      // Dispose of the DRACO loader when component unmounts
       const dracoLoader = new DRACOLoader();
       dracoLoader.dispose();
     };
-  }, [scene, onModelLoaded, position, scale]);
+  }, [scene, onModelLoaded, position, scale, registerUpdate]);
 
-  // Method to play a specific animation
   const playAnimation = (animationName: string, fadeInTime: number = 0.5) => {
-    if (!actionsRef.current[animationName]) {
-      // Animation not found
+    const lowerCaseName = animationName.toLowerCase();
+    const targetAction = actionsRef.current[lowerCaseName];
+
+    console.log(`playAnimation called with: "${animationName}" (checking for key "${lowerCaseName}")`);
+
+    if (!targetAction) {
+      console.warn(`Animation action with key "${lowerCaseName}" not found in actionsRef. Available keys:`, Object.keys(actionsRef.current));
       return;
     }
 
-    // Fade out all current animations
-    Object.values(actionsRef.current).forEach(action => {
-      if (action.isRunning()) {
+    Object.entries(actionsRef.current).forEach(([name, action]) => {
+      if (name !== lowerCaseName && action.isRunning()) {
+        console.log(`Fading out action: ${name}`);
         action.fadeOut(fadeInTime);
       }
     });
 
-    // Fade in the new animation
-    const action = actionsRef.current[animationName];
-    action.reset().fadeIn(fadeInTime).play();
+    console.log(`Fading in action: ${lowerCaseName}`);
+    targetAction.reset().fadeIn(fadeInTime).play();
   };
 
-  // Update the animation mixer in the game loop
   useEffect(() => {
     if (!scene || !registerUpdate) return;
 
-    // Create animation update function
     const update: IdentifiableFunction = (delta: number) => {
       if (mixerRef.current) {
         mixerRef.current.update(delta);
       }
     };
 
-    // Add identifier to the update function
     update._id = 'characterAnimation';
-
-    // Register the update function with the game loop
     const unregisterUpdate = registerUpdate(update);
 
     return () => {
-      // Unregister the update function when component unmounts
       unregisterUpdate();
     };
   }, [scene, isLoaded, registerUpdate]);
 
-  // Expose the playAnimation method to parent components
   useEffect(() => {
     if (!modelRef.current) return;
 
-    // Attach the playAnimation method to the model for external access
     const model = modelRef.current as THREE.Group & { playAnimation?: typeof playAnimation };
     model.playAnimation = playAnimation;
+  }, [isLoaded]);
 
-    // No dependencies needed, as this should run only once after model is loaded
-  }, []);  // Empty dependency array is acceptable here
+  // Add this useEffect to react to scale prop changes
+  useEffect(() => {
+    if (modelRef.current && scale) {
+      console.log('Character.tsx: Scale useEffect - Applying new scale:', scale.x, scale.y, scale.z);
+      modelRef.current.scale.copy(scale);
+    }
+  }, [scale]); // Re-run this effect if the scale prop changes
 
-  // The component doesn't render anything directly
   return null;
 }

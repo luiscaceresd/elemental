@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Character from './Character';
@@ -37,14 +37,21 @@ export default function CharacterController({
   const onGroundRef = useRef(true);
   // Create a ref to store character position for external components to access
   const characterPositionRef = useRef<THREE.Vector3 | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const lastTerrainHeightRef = useRef<number>(0);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const movingRef = useRef<boolean>(false);
   // Add Cannon.js body reference
   const characterBodyRef = useRef<CANNON.Body | null>(null);
   // Track last ground state for debugging
   const lastGroundStateRef = useRef<boolean>(true);
+  const currentAnimationRef = useRef<string | null>(null);
+
+  // --- Add State/Memo for Stable Props ---
+  // Restore useMemo for production build stability
+  const characterScale = useMemo(() => new THREE.Vector3(3, 3, 3), []); 
+  // console.log('CharacterController Render: characterScale =', characterScale.x, characterScale.y, characterScale.z); // Keep commented for build
+  // Use state for the initial position to ensure a stable reference if ref is null
+  const [initialPosition] = useState(() => new THREE.Vector3(0, 1, 5));
+  // ------------------------------------
 
   // This useEffect is necessary for THREE.js integration and physics
   useEffect(() => {
@@ -54,7 +61,8 @@ export default function CharacterController({
 
       // Initialize references that need THREE
       velocityRef.current = new THREE.Vector3(0, 0, 0);
-      characterPositionRef.current = new THREE.Vector3(0, 1, 5);
+       // Use the state variable for initial physics position
+      characterPositionRef.current = initialPosition.clone();
 
       // Remove any existing colliders to prevent duplicates
       const existingCollider = scene.getObjectByName('characterCollider');
@@ -67,7 +75,8 @@ export default function CharacterController({
       const characterBody = new CANNON.Body({
         mass: 5, // Character has mass (dynamic object)
         shape: characterShape,
-        position: new CANNON.Vec3(0, 3, 5), // Initial position - start a bit higher to ensure it doesn't spawn inside the ground
+        // position: new CANNON.Vec3(0, 3, 5), // Initial position - start a bit higher to ensure it doesn't spawn inside the ground
+        position: new CANNON.Vec3(initialPosition.x, initialPosition.y + 2, initialPosition.z), // Adjust initial physics pos based on state
         material: new CANNON.Material("characterMaterial"),
         linearDamping: 0, // No damping for frictionless movement
         angularDamping: 0.99, // Prevent excessive rotation
@@ -210,18 +219,44 @@ export default function CharacterController({
 
         // Jump if space is pressed and character is on the ground
         if (keys.current[' '] && onGroundRef.current) {
-          characterBodyRef.current.velocity.y = 6; // Reduced from 10 to 6
+          characterBodyRef.current.velocity.y = 5; // Reduced from 6 to 5
           onGroundRef.current = false; // Immediately set ground state to false
           
           // Add a small upward impulse for more responsive jumping
           characterBodyRef.current.applyImpulse(
-            new CANNON.Vec3(0, 25, 0), // Reduced from 50 to 25
+            new CANNON.Vec3(0, 15, 0), // Reduced from 25 to 15
             characterBodyRef.current.position // Apply at center of mass
           );
           
           // Removed console.log
         }
         
+        // --- Animation State Machine ---
+        let nextAnimation = 'idle'; // Default to idle
+        const characterBody = characterBodyRef.current; // Alias for easier access
+        
+        if (!onGroundRef.current) {
+            nextAnimation = 'jumping';
+        } else if (isMoving) {
+            // Calculate horizontal speed
+            const speed = new THREE.Vector3(characterBody.velocity.x, 0, characterBody.velocity.z).length();
+            if (speed > 15) { // Adjust threshold as needed for running
+                nextAnimation = 'running';
+            } else {
+                nextAnimation = 'walking';
+            }
+        }
+        
+        // Check if the character model exists and has the playAnimation method
+        const characterModel = characterRef.current as (THREE.Group & { playAnimation?: (name: string, fade: number) => void }) | null;
+
+        if (characterModel?.playAnimation && nextAnimation !== currentAnimationRef.current) {
+            console.log(`Switching animation from ${currentAnimationRef.current} to ${nextAnimation}`);
+            characterModel.playAnimation(nextAnimation, 0.3); // Play with fade
+            currentAnimationRef.current = nextAnimation;
+        }
+        // --- End Animation State Machine ---
+
         // Reset ground state when falling
         if (characterBodyRef.current.velocity.y < -1) {
           onGroundRef.current = false;
@@ -238,7 +273,7 @@ export default function CharacterController({
         // Update the character model position
         if (characterRef.current) {
           characterRef.current.position.copy(characterPositionRef.current);
-          characterRef.current.position.y -= 0.5; // Lower it slightly for visual alignment
+          characterRef.current.position.y -= 1; // <-- UNCOMMENT this offset
           characterRef.current.visible = true;
         }
 
@@ -276,19 +311,19 @@ export default function CharacterController({
     };
 
     setupCharacter();
-  }, [scene, keysRef, registerUpdate, camera, onPositionUpdate, world]);
+  }, [scene, keysRef, registerUpdate, camera, onPositionUpdate, world, initialPosition]);
 
-  // Handle character model loaded from the Character component
-  const handleModelLoaded = (model: THREE.Group) => {
+  // --- Wrap handleModelLoaded in useCallback ---
+  const handleModelLoaded = useCallback((model: THREE.Group) => {
+    // Log the UUID of the model received by the controller
+    console.log(`CharacterController handleModelLoaded: Received model UUID: ${model.uuid}`);
     characterRef.current = model;
 
     // If we already have a position, update the model
     if (characterPositionRef.current) {
+      console.log(`CharacterController handleModelLoaded: Applying initial position/scale to UUID: ${model.uuid}`);
       model.position.copy(characterPositionRef.current);
-      model.position.y -= 0.5; // Reduced offset for better visibility on terrain
-
-      // Adjust scale if needed - scale up slightly for better visibility
-      model.scale.set(1.2, 1.2, 1.2);
+      // model.position.y -= 0.5; // Apply offset if needed, currently commented
 
       // Ensure model and all its children are visible
       model.visible = true;
@@ -310,15 +345,20 @@ export default function CharacterController({
           }
         }
       });
+    } else {
+       console.log(`CharacterController handleModelLoaded: No initial characterPositionRef for UUID: ${model.uuid}`);
     }
-  };
+     // Add dependencies for useCallback
+  }, [characterScale]); // Add characterScale to dependencies
+  // ------------------------------------------
 
   return (
     <Character
       scene={scene}
-      onModelLoaded={handleModelLoaded}
-      position={characterPositionRef.current || new THREE.Vector3(0, 1, 5)}
-      scale={new THREE.Vector3(1.2, 1.2, 1.2)} // Increased scale for better visibility
+      onModelLoaded={handleModelLoaded} // Pass the memoized callback
+      // Pass stable position reference (ref should be set by the time Character mounts ideally)
+      position={characterPositionRef.current ?? initialPosition}
+      scale={characterScale} // Pass the stable scale vector
       registerUpdate={registerUpdate}
     />
   );
