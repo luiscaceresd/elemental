@@ -12,9 +12,10 @@ export default function Water({ position, scene }: WaterProps) {
   const waterRef = useRef<THREE.Mesh | null>(null);
 
   useEffect(() => {
-    // Dynamic import for client-side only libraries
-    const setupWater = async () => {
-      const THREE = await import('three');
+    // Dynamic import for client-side only libraries - REMOVED
+    // REMOVED async
+    const setupWater = () => {
+      // REMOVED: const THREE = await import('three');
 
       // Create a blue sphere to represent water
       const geometry = new THREE.SphereGeometry(1, 32, 32);
@@ -44,12 +45,14 @@ export default function Water({ position, scene }: WaterProps) {
       };
     };
 
-    const cleanup = setupWater();
+    // Call setup directly
+    const cleanupFn = setupWater(); 
 
     return () => {
-      cleanup.then(cleanupFn => {
-        if (cleanupFn) cleanupFn();
-      });
+      // Adjusted cleanup return
+      if (cleanupFn) {
+        cleanupFn();
+      }
     };
   }, [position, scene]);
 

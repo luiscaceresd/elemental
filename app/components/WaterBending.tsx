@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
+import Hammer from 'hammerjs';
 import WaterMeter from './WaterMeter';
 
 // Extend the type definitions for CANNON.World to include missing methods
@@ -140,9 +141,7 @@ export default function WaterBending({
   }, [scene, world]);
 
   useEffect(() => {
-    const setupWaterBending = async () => {
-      const THREE = await import('three');
-      const Hammer = (await import('hammerjs')).default;
+    const setupWaterBending = () => {
       raycasterRef.current = new THREE.Raycaster();
 
       // Initialize shared resources for the projectile
@@ -793,52 +792,54 @@ export default function WaterBending({
             if (drop.inUse) {
               drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
               
-              // Check if character is in range
-              const characterInRange = characterPositionRef?.current ? 
-                drop.mesh.position.distanceTo(characterPositionRef.current) < 30 : true;
+              // Pull drop toward the crosshair with increased strength
+              const direction = new CANNON.Vec3(
+                crosshairPositionRef.current.x - drop.body.position.x,
+                crosshairPositionRef.current.y - drop.body.position.y,
+                crosshairPositionRef.current.z - drop.body.position.z
+              );
+              const distanceSq = 
+                Math.pow(crosshairPositionRef.current.x - drop.body.position.x, 2) +
+                Math.pow(crosshairPositionRef.current.y - drop.body.position.y, 2) +
+                Math.pow(crosshairPositionRef.current.z - drop.body.position.z, 2);
+              const distance = Math.sqrt(distanceSq);
 
-              if (characterInRange) {
-                // Pull drop toward the crosshair with increased strength
-                const direction = new CANNON.Vec3(
-                  crosshairPositionRef.current.x - drop.body.position.x,
-                  crosshairPositionRef.current.y - drop.body.position.y,
-                  crosshairPositionRef.current.z - drop.body.position.z
+              // Check distance to crosshair
+              if (distance < 30) { 
+                direction.normalize();
+                // Increased pull strength from 25 to 50
+                const pullStrength = 50 * (1 - distance / 30); // <-- INCREASED STRENGTH
+                const forceVec = new CANNON.Vec3(
+                  direction.x * pullStrength * delta * drop.body.mass,
+                  direction.y * pullStrength * delta * drop.body.mass,
+                  direction.z * pullStrength * delta * drop.body.mass
                 );
-                const distanceSq = 
-                  Math.pow(crosshairPositionRef.current.x - drop.body.position.x, 2) +
-                  Math.pow(crosshairPositionRef.current.y - drop.body.position.y, 2) +
-                  Math.pow(crosshairPositionRef.current.z - drop.body.position.z, 2);
-                const distance = Math.sqrt(distanceSq);
-
-                if (distance < 30) {
-                  direction.normalize();
-                  const pullStrength = 25 * (1 - distance / 30);
-                  const forceVec = new CANNON.Vec3(
-                    direction.x * pullStrength * delta * drop.body.mass,
-                    direction.y * pullStrength * delta * drop.body.mass,
-                    direction.z * pullStrength * delta * drop.body.mass
-                  );
-                  drop.body.applyForce(forceVec, drop.body.position);
+                // Ensure the body is awake to receive force
+                if (drop.body.sleepState === CANNON.Body.SLEEPING) {
+                  drop.body.wakeUp();
                 }
+                drop.body.applyForce(forceVec, drop.body.position);
+              }
 
-                if (distance < 1.2) {
-                  if (collectedDropsRef.current < MAX_WATER_DROPS) {
-                    collectedDropsRef.current += 1;
-                    if (bendingEffectRef.current) {
-                      const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
-                      material.opacity = 0.8;
-                      setTimeout(() => {
-                        if (material) material.opacity = 0.4;
-                      }, 100);
-                    }
+              // Check distance to crosshair again for collection
+              if (distance < 1.2) { 
+                if (collectedDropsRef.current < MAX_WATER_DROPS) {
+                  collectedDropsRef.current += 1;
+                  if (bendingEffectRef.current) {
+                    const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
+                    material.opacity = 0.8;
+                    setTimeout(() => {
+                      if (material) material.opacity = 0.4;
+                    }, 100);
                   }
-                  // Reset the drop
-                  drop.inUse = false;
-                  drop.mesh.visible = false;
-                  drop.body.position.set(0, -1000, 0);
-                  drop.body.velocity.set(0, 0, 0);
-                  drop.body.sleep();
                 }
+                // Reset the drop
+                drop.inUse = false;
+                drop.mesh.visible = false;
+                drop.body.position.set(0, -1000, 0);
+                drop.body.velocity.set(0, 0, 0);
+                drop.body.angularVelocity.set(0, 0, 0); // Also reset angular velocity
+                drop.body.sleep();
               }
             }
           });
@@ -964,11 +965,11 @@ export default function WaterBending({
       };
     };
 
-    const cleanup = setupWaterBending();
+    const cleanupFn = setupWaterBending();
     return () => {
-      cleanup.then(cleanupFn => {
-        if (cleanupFn) cleanupFn();
-      });
+      if (cleanupFn) {
+        cleanupFn();
+      }
     };
   }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool]);
 

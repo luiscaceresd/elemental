@@ -20,6 +20,11 @@ export default function GameWrapper() {
   const pointerLockRequestedRef = useRef(false);
   const pointerLockTimerRef = useRef<number | null>(null);
 
+  // Preload the GameCanvas component as soon as GameWrapper mounts
+  useEffect(() => {
+    import('./GameCanvas');
+  }, []);
+
   // Check if device is mobile
   useEffect(() => {
     const checkMobile = () => {
