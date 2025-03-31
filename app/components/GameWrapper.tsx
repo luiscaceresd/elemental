@@ -185,18 +185,21 @@ export default function GameWrapper() {
       {gameState === 'start' && <StartScreen onStart={handleStartGame} />}
 
       {(gameState === 'playing' || gameState === 'paused') && (
-        <div className={gameState === 'paused' ? 'game-paused' : ''}>
-          <GameCanvas gameState={gameState} />
-          {gameState === 'playing' && (
-            <PauseButton
-              onPause={handlePauseGame}
-              isMobile={isMobile}
-            />
-          )}
-          {gameState === 'paused' && (
-            <PauseMenu onResume={handleResumeGame} onExit={handleExitGame} />
-          )}
-        </div>
+        <>
+          <div className={gameState === 'paused' ? 'game-paused' : ''}>
+            <GameCanvas gameState={gameState} />
+            {gameState === 'playing' && (
+              <PauseButton
+                onPause={handlePauseGame}
+                isMobile={isMobile}
+              />
+            )}
+            {gameState === 'paused' && (
+              <PauseMenu onResume={handleResumeGame} onExit={handleExitGame} />
+            )}
+          </div>
+          <a target="_blank" href="https://jam.pieter.com" style={{ fontFamily: "'system-ui', sans-serif", position: 'fixed', bottom: -1, right: -1, padding: '7px', fontSize: '14px', fontWeight: 'bold', background: '#fff', color: '#000', textDecoration: 'none', zIndex: 10000, borderTopLeftRadius: '12px', border: '1px solid #fff' }}>🕹️ Vibe Jam 2025</a>
+        </>
       )}
     </>
   );
