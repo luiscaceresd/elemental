@@ -30,8 +30,8 @@ export default function CharacterController({
   registerUpdate,
   camera,
   onPositionUpdate,
-  world
-}: CharacterControllerProps) {
+  world,
+}: Omit<CharacterControllerProps, 'gameState'>) {
   const characterRef = useRef<THREE.Group | null>(null);
   const velocityRef = useRef<THREE.Vector3 | null>(null);
   const onGroundRef = useRef(true);
@@ -167,8 +167,9 @@ export default function CharacterController({
           ' ': boolean;
         }>;
 
-        // Debug movement - only when keys are pressed
         const isMoving = keys.current.w || keys.current.a || keys.current.s || keys.current.d;
+
+        // Debug movement - only when keys are pressed
         if (isMoving && Math.floor(Date.now() / 500) % 2 === 0) {
           // Removed console.log
         }
@@ -235,24 +236,28 @@ export default function CharacterController({
         let nextAnimation = 'idle'; // Default to idle
         const characterBody = characterBodyRef.current; // Alias for easier access
         
+        if (!characterBody) {
+          // console.warn("CharacterController update: characterBodyRef is null, skipping animation logic.");
+          return; // Exit if body doesn't exist
+        }
+        
         if (!onGroundRef.current) {
             nextAnimation = 'jumping';
-        } else if (isMoving) {
-            // Calculate horizontal speed
+        } else if (isMoving) { // Use the isMoving declared earlier
             const speed = new THREE.Vector3(characterBody.velocity.x, 0, characterBody.velocity.z).length();
-            if (speed > 15) { // Adjust threshold as needed for running
+            if (speed > 15) { 
                 nextAnimation = 'running';
             } else {
                 nextAnimation = 'walking';
             }
         }
         
-        // Check if the character model exists and has the playAnimation method
         const characterModel = characterRef.current as (THREE.Group & { playAnimation?: (name: string, fade: number) => void }) | null;
 
         if (characterModel?.playAnimation && nextAnimation !== currentAnimationRef.current) {
-            console.log(`Switching animation from ${currentAnimationRef.current} to ${nextAnimation}`);
-            characterModel.playAnimation(nextAnimation, 0.3); // Play with fade
+            // LOG BEFORE playing animation
+            console.log(`CharacterController: Switching animation from "${currentAnimationRef.current}" to "${nextAnimation}"`); 
+            characterModel.playAnimation(nextAnimation, 0.3); 
             currentAnimationRef.current = nextAnimation;
         }
         // --- End Animation State Machine ---

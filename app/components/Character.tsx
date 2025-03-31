@@ -25,7 +25,7 @@ export default function Character({
   position = new THREE.Vector3(0, 0, 0),
   scale = new THREE.Vector3(5, 5, 5),
   registerUpdate,
-}: CharacterProps) {
+}: Omit<CharacterProps, 'gameState'>) {
   console.log('Character Render: Received scale prop:', scale?.x, scale?.y, scale?.z);
   const modelRef = useRef<THREE.Group | null>(null);
   const mixerRef = useRef<AnimationMixer | null>(null);
@@ -148,26 +148,29 @@ export default function Character({
     const lowerCaseName = animationName.toLowerCase();
     const targetAction = actionsRef.current[lowerCaseName];
 
-    console.log(`playAnimation called with: "${animationName}" (checking for key "${lowerCaseName}")`);
+    console.log(`Character.tsx: playAnimation called with: "${animationName}" (checking for key "${lowerCaseName}")`);
 
     if (!targetAction) {
-      console.warn(`Animation action with key "${lowerCaseName}" not found in actionsRef. Available keys:`, Object.keys(actionsRef.current));
+      console.warn(`Character.tsx: Animation action with key "${lowerCaseName}" not found. Available:`, Object.keys(actionsRef.current));
       return;
     }
 
+    console.log(`Character.tsx: Target action "${lowerCaseName}" current timeScale: ${targetAction.timeScale}`);
+
     Object.entries(actionsRef.current).forEach(([name, action]) => {
       if (name !== lowerCaseName && action.isRunning()) {
-        console.log(`Fading out action: ${name}`);
+        console.log(`Character.tsx: Fading out action: ${name}`);
         action.fadeOut(fadeInTime);
       }
     });
 
-    console.log(`Fading in action: ${lowerCaseName}`);
+    console.log(`Character.tsx: Fading in action: ${lowerCaseName}`);
     targetAction.reset().fadeIn(fadeInTime).play();
+    console.log(`Character.tsx: Action "${lowerCaseName}" play() called.`);
   };
 
   useEffect(() => {
-    if (!scene || !registerUpdate) return;
+    if (!scene || !registerUpdate || !isLoaded) return;
 
     const update: IdentifiableFunction = (delta: number) => {
       if (mixerRef.current) {
@@ -181,22 +184,21 @@ export default function Character({
     return () => {
       unregisterUpdate();
     };
-  }, [scene, isLoaded, registerUpdate]);
+  }, [scene, isLoaded]);
 
   useEffect(() => {
-    if (!modelRef.current) return;
+    if (!modelRef.current || !isLoaded) return;
 
     const model = modelRef.current as THREE.Group & { playAnimation?: typeof playAnimation };
     model.playAnimation = playAnimation;
   }, [isLoaded]);
 
-  // Add this useEffect to react to scale prop changes
   useEffect(() => {
     if (modelRef.current && scale) {
       console.log('Character.tsx: Scale useEffect - Applying new scale:', scale.x, scale.y, scale.z);
       modelRef.current.scale.copy(scale);
     }
-  }, [scale]); // Re-run this effect if the scale prop changes
+  }, [scale]);
 
   return null;
 }
