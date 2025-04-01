@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
+import Hammer from 'hammerjs';
 import WaterMeter from './WaterMeter';
+import { CharacterControllerRef } from './CharacterController';
 
 // Extend the type definitions for CANNON.World to include missing methods
 declare module 'cannon' {
@@ -25,6 +27,8 @@ interface WaterBendingProps {
   crosshairPositionRef: React.MutableRefObject<THREE.Vector3>;
   characterPositionRef?: React.MutableRefObject<THREE.Vector3 | null>;
   world: CANNON.World;
+  updateWaterStatus?: (hasEnoughWater: boolean) => void;
+  characterControllerRef?: React.RefObject<CharacterControllerRef | null>;
 }
 
 // Define a WaterDrop type for our pool
@@ -46,6 +50,7 @@ interface WaterSpear {
   hasExploded?: boolean; // NEW: tracks if the spear has exploded
   initialVelocity?: THREE.Vector3; // For bullet-like travel
   _updateId?: string; // ID of the update function for this spear
+  shooterId?: string; // Added shooter ID
 }
 
 // Debug flag to show water source detection
@@ -59,7 +64,9 @@ export default function WaterBending({
   isBendingRef,
   crosshairPositionRef,
   characterPositionRef,
-  world
+  world,
+  updateWaterStatus,
+  characterControllerRef
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
   const _mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2()); // Renamed with underscore to indicate intentionally unused
@@ -96,6 +103,14 @@ export default function WaterBending({
     const animationId = requestAnimationFrame(updateDisplayCount);
     return () => cancelAnimationFrame(animationId);
   }, []);
+
+  useEffect(() => {
+    // Update the character animation system when water status changes
+    if (updateWaterStatus) {
+      const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
+      updateWaterStatus(hasEnoughWater);
+    }
+  }, [displayedDrops, updateWaterStatus, REQUIRED_DROPS_TO_FIRE]);
 
   const returnSpearToPool = useCallback((spear: WaterSpear) => {
     if (!spear || !spearPoolRef.current.includes(spear)) {
@@ -140,9 +155,7 @@ export default function WaterBending({
   }, [scene, world]);
 
   useEffect(() => {
-    const setupWaterBending = async () => {
-      const THREE = await import('three');
-      const Hammer = (await import('hammerjs')).default;
+    const setupWaterBending = () => {
       raycasterRef.current = new THREE.Raycaster();
 
       // Initialize shared resources for the projectile
@@ -368,6 +381,15 @@ export default function WaterBending({
       const createWaterSpear = () => {
         if (!characterPositionRef?.current) return;
         if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) return;
+        
+        // Update water status first
+        if (updateWaterStatus) {
+          updateWaterStatus(false);
+          setTimeout(() => {
+            updateWaterStatus(collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE);
+          }, 100);
+        }
+        
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
 
         // Helper: explosion effect – always trigger explosion on collision/lifetime
@@ -522,6 +544,10 @@ export default function WaterBending({
         const maxLifetime = 10000;
         const creationTime = Date.now();
 
+        // Store the ID of the character who fired this spear to prevent self-damage
+        const shooterId = 'player'; // In a multiplayer game, this would be a unique player ID
+        pooledSpear.shooterId = shooterId;
+
         // Update function for the spear projectile
         const updateSpear: IdentifiableFunction = (delta: number) => {
           if (!pooledSpear.body) {
@@ -584,22 +610,54 @@ export default function WaterBending({
         };
 
         // Always trigger explosion on any collision
-        spearBody.addEventListener('collide', (/* _event */) => { // Changed to a comment inside the parameter list 
+        spearBody.addEventListener('collide', (event: { type: string; body: CANNON.Body; contact: CANNON.ContactEquation; }) => { 
           if (!pooledSpear.body) return;
-          if (!pooledSpear.hasExploded) {
-            pooledSpear.hasExploded = true;
-            // Trigger immediate visual explosion
-            triggerExplosion(spearGroup.position.clone());
-            // Create water drops
-            createExplosionEffect(spearGroup.position.clone());
+          if (pooledSpear.hasExploded) return;
+          
+          // Get the collided body
+          const collidedBody = event.body;
+          
+          // Mark as exploded to prevent multiple explosions
+          pooledSpear.hasExploded = true;
+          
+          // Trigger immediate visual explosion
+          triggerExplosion(spearGroup.position.clone());
+          
+          // Create water drops
+          createExplosionEffect(spearGroup.position.clone());
+
+          // Inflict damage on characters in an area
+          // Find all characters in the explosion radius (except the shooter)
+          const DAMAGE_AMOUNT = 60; // 60 HP damage
+          const EXPLOSION_RADIUS = 5; // 5 units radius (not too big, as requested)
+          const explosionPosition = spearGroup.position.clone();
+          
+          // Check if the player character is close to the explosion
+          if (characterControllerRef?.current && characterPositionRef?.current) {
+            // Calculate distance to explosion
+            const distanceToPlayer = explosionPosition.distanceTo(characterPositionRef.current);
+            
+            // Check if within explosion radius AND not the shooter (to prevent self-damage)
+            if (distanceToPlayer < EXPLOSION_RADIUS && pooledSpear.shooterId !== 'player') {
+              // Apply damage based on proximity (full damage at center, less at edge)
+              const damageMultiplier = 1 - (distanceToPlayer / EXPLOSION_RADIUS);
+              const actualDamage = Math.floor(DAMAGE_AMOUNT * damageMultiplier);
+              
+              // Apply damage to the character
+              if (actualDamage > 0) {
+                characterControllerRef.current.takeDamage(actualDamage);
+              }
+            }
           }
           
+          // Remove the spear physics body
           const body = pooledSpear.body;
           setTimeout(() => {
             if (body) world.removeBody(body);
           }, 50);
           pooledSpear.body = undefined;
           
+          // Return the spear to the pool
           setTimeout(() => {
             returnSpearToPool(pooledSpear);
             removeSpearUpdate();
@@ -623,20 +681,31 @@ export default function WaterBending({
       // Input handlers
       const onMouseDown = (event: MouseEvent) => {
         if (event.button === 0) {
+          // Let the left-click event propagate for bending animation in CharacterController
           isBendingRef.current = true;
           updateCrosshairPosition();
         }
       };
+      
       const onMouseUp = (event: MouseEvent) => {
         if (event.button === 0) {
+          // Let the left-click release event propagate
           isBendingRef.current = false;
         }
       };
+      
       const onRightClick = (event: MouseEvent) => {
         if (event.button === 2) {
-          event.preventDefault();
+          console.log("WaterBending: Processing right click"); // Debug log
+
+          // Don't prevent default here - CharacterController needs to see this event
+          // event.preventDefault();
+          
           if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
+            console.log("WaterBending: Creating water spear"); // Debug log
             createWaterSpear();
+          } else {
+            console.log("WaterBending: Not enough water to create spear"); // Debug log
           }
         }
       };
@@ -793,52 +862,54 @@ export default function WaterBending({
             if (drop.inUse) {
               drop.mesh.position.copy(drop.body.position as unknown as THREE.Vector3);
               
-              // Check if character is in range
-              const characterInRange = characterPositionRef?.current ? 
-                drop.mesh.position.distanceTo(characterPositionRef.current) < 30 : true;
+              // Pull drop toward the crosshair with increased strength
+              const direction = new CANNON.Vec3(
+                crosshairPositionRef.current.x - drop.body.position.x,
+                crosshairPositionRef.current.y - drop.body.position.y,
+                crosshairPositionRef.current.z - drop.body.position.z
+              );
+              const distanceSq = 
+                Math.pow(crosshairPositionRef.current.x - drop.body.position.x, 2) +
+                Math.pow(crosshairPositionRef.current.y - drop.body.position.y, 2) +
+                Math.pow(crosshairPositionRef.current.z - drop.body.position.z, 2);
+              const distance = Math.sqrt(distanceSq);
 
-              if (characterInRange) {
-                // Pull drop toward the crosshair with increased strength
-                const direction = new CANNON.Vec3(
-                  crosshairPositionRef.current.x - drop.body.position.x,
-                  crosshairPositionRef.current.y - drop.body.position.y,
-                  crosshairPositionRef.current.z - drop.body.position.z
+              // Check distance to crosshair
+              if (distance < 30) { 
+                direction.normalize();
+                // Increased pull strength from 25 to 50
+                const pullStrength = 50 * (1 - distance / 30); // <-- INCREASED STRENGTH
+                const forceVec = new CANNON.Vec3(
+                  direction.x * pullStrength * delta * drop.body.mass,
+                  direction.y * pullStrength * delta * drop.body.mass,
+                  direction.z * pullStrength * delta * drop.body.mass
                 );
-                const distanceSq = 
-                  Math.pow(crosshairPositionRef.current.x - drop.body.position.x, 2) +
-                  Math.pow(crosshairPositionRef.current.y - drop.body.position.y, 2) +
-                  Math.pow(crosshairPositionRef.current.z - drop.body.position.z, 2);
-                const distance = Math.sqrt(distanceSq);
-
-                if (distance < 30) {
-                  direction.normalize();
-                  const pullStrength = 25 * (1 - distance / 30);
-                  const forceVec = new CANNON.Vec3(
-                    direction.x * pullStrength * delta * drop.body.mass,
-                    direction.y * pullStrength * delta * drop.body.mass,
-                    direction.z * pullStrength * delta * drop.body.mass
-                  );
-                  drop.body.applyForce(forceVec, drop.body.position);
+                // Ensure the body is awake to receive force
+                if (drop.body.sleepState === CANNON.Body.SLEEPING) {
+                  drop.body.wakeUp();
                 }
+                drop.body.applyForce(forceVec, drop.body.position);
+              }
 
-                if (distance < 1.2) {
-                  if (collectedDropsRef.current < MAX_WATER_DROPS) {
-                    collectedDropsRef.current += 1;
-                    if (bendingEffectRef.current) {
-                      const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
-                      material.opacity = 0.8;
-                      setTimeout(() => {
-                        if (material) material.opacity = 0.4;
-                      }, 100);
-                    }
+              // Check distance to crosshair again for collection
+              if (distance < 1.2) { 
+                if (collectedDropsRef.current < MAX_WATER_DROPS) {
+                  collectedDropsRef.current += 1;
+                  if (bendingEffectRef.current) {
+                    const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
+                    material.opacity = 0.8;
+                    setTimeout(() => {
+                      if (material) material.opacity = 0.4;
+                    }, 100);
                   }
-                  // Reset the drop
-                  drop.inUse = false;
-                  drop.mesh.visible = false;
-                  drop.body.position.set(0, -1000, 0);
-                  drop.body.velocity.set(0, 0, 0);
-                  drop.body.sleep();
                 }
+                // Reset the drop
+                drop.inUse = false;
+                drop.mesh.visible = false;
+                drop.body.position.set(0, -1000, 0);
+                drop.body.velocity.set(0, 0, 0);
+                drop.body.angularVelocity.set(0, 0, 0); // Also reset angular velocity
+                drop.body.sleep();
               }
             }
           });
@@ -909,14 +980,20 @@ export default function WaterBending({
             }
           }
         }
+
+        // Update water status after collection
+        if (updateWaterStatus) {
+          const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
+          updateWaterStatus(hasEnoughWater);
+        }
       };
       updateBendingEffects._id = 'bendingVisualEffects';
       const removeEffectsUpdate = registerUpdate(updateBendingEffects);
 
-      // Add event listeners
-      window.addEventListener('mousedown', onMouseDown, { capture: true });
-      window.addEventListener('mouseup', onMouseUp, { capture: true });
-      window.addEventListener('mousedown', onRightClick, { capture: true });
+      // Add event listeners - don't use capture to let CharacterController handle events first
+      window.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mouseup', onMouseUp);
+      window.addEventListener('mousedown', onRightClick);
 
       return () => {
         // Cleanup (removing objects, disposing geometries/materials, and event listeners)
@@ -958,19 +1035,19 @@ export default function WaterBending({
         removeEffectsUpdate();
         removeUpdateCrosshair();
         removeWaterDropsUpdate();
-        window.removeEventListener('mousedown', onRightClick, { capture: true });
-        window.removeEventListener('mousedown', onMouseDown, { capture: true });
-        window.removeEventListener('mouseup', onMouseUp, { capture: true });
+        window.removeEventListener('mousedown', onRightClick);
+        window.removeEventListener('mousedown', onMouseDown);
+        window.removeEventListener('mouseup', onMouseUp);
       };
     };
 
-    const cleanup = setupWaterBending();
+    const cleanupFn = setupWaterBending();
     return () => {
-      cleanup.then(cleanupFn => {
-        if (cleanupFn) cleanupFn();
-      });
+      if (cleanupFn) {
+        cleanupFn();
+      }
     };
-  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool]);
+  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus, characterControllerRef]);
 
   return (
     <WaterMeter

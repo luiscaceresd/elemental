@@ -2,13 +2,15 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import CharacterController from './CharacterController';
+import CharacterController, { CharacterControllerRef } from './CharacterController';
 import CameraController from './CameraController';
 import WaterBending from './WaterBending';
 import MobileControls from './MobileControls';
 import World from './World';
 import Pond from './Pond';
 import Crosshair from './Crosshair';
+import PortalManager from './PortalManager';
+import HealthBar from './HealthBar';
 import * as CANNON from 'cannon';
 
 // Add a type for functions with an identifier
@@ -23,7 +25,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
   // Use a callback for device detection instead of useEffect
   const checkMobile = useCallback(() => {
     return typeof window !== 'undefined' &&
-      (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      (/AndrodBlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
         || window.innerWidth < 768);
   }, []);
 
@@ -45,12 +47,17 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     d: false,
     ' ': false
   });
-  const characterPositionRef = useRef<THREE.Vector3 | null>(null);
+  
+  // Use a stable reference for character position to avoid re-renders
+  const characterPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 1, 5));
   const updateFunctionsRef = useRef<IdentifiableFunction[]>([]);
 
   // New refs for waterbending
   const isBendingRef = useRef<boolean>(false);
   const crosshairPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+
+  // Reference for character controller
+  const characterControllerRef = useRef<CharacterControllerRef>(null);
 
   // Detect if we're on a mobile device - this effect is necessary as it involves window APIs
   useEffect(() => {
@@ -152,9 +159,6 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       // Add fog for atmospheric depth
       scene.fog = new THREE.Fog(0x87CEFA, 70, 300); // Increased distance for better visibility
 
-      // Initialize character position reference
-      characterPositionRef.current = new THREE.Vector3(0, 1, 5);
-
       // Handle keyboard inputs for PC controls
       const onKeyDown = (event: KeyboardEvent) => {
         // Convert key to lowercase to handle both cases
@@ -194,43 +198,37 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       // Animation loop with clock for delta time
       const clock = new THREE.Clock();
       let animationFrameId: number;
-      let isPaused = gameState === 'paused';
       
-      // Store last known game state to detect changes
-      let lastGameState = gameState;
-
       const animate = () => {
         animationFrameId = requestAnimationFrame(animate);
-        const delta = clock.getDelta();
 
-        // Check if game state has changed
-        if (lastGameState !== gameState) {
-          if (gameState === 'paused') {
-            isPaused = true;
-            clock.stop(); // Stop the clock when paused
-          } else {
-            isPaused = false;
-            clock.start(); // Restart the clock when resuming
+        // Only update physics, game logic, and get delta if playing
+        if (gameState === 'playing') {
+          // Get delta ONLY when playing
+          const delta = clock.getDelta(); 
+          // Clamp delta to avoid huge jumps after resuming or frame drops
+          const clampedDelta = Math.min(delta, 0.1); // Max delta of 0.1s (adjust as needed)
+
+          // Step the physics world forward
+          if (worldRef.current) {
+            const maxSubSteps = 5; 
+            const fixedTimeStep = 1/120; 
+            // Use clampedDelta for physics step
+            worldRef.current.step(fixedTimeStep, clampedDelta, maxSubSteps);
           }
-          lastGameState = gameState;
+          
+          // Run all registered update functions
+          // Use clampedDelta for updates
+          updateFunctionsRef.current.forEach(update => update(clampedDelta));
         }
 
-        // Step the physics world forward with substeps for stability
-        if (worldRef.current && gameState === 'playing') {
-          const maxSubSteps = 5; // More substeps for better stability
-          const fixedTimeStep = 1/120; // Smaller timestep for more precision
-          worldRef.current.step(fixedTimeStep, delta, maxSubSteps);
-        }
-
-        // Run all registered update functions
-        updateFunctionsRef.current.forEach(update => update(delta));
-
-        // Always render the scene, even when paused
-        if (renderer && scene && camera) {
-          renderer.render(scene, camera);
+        // Always render the scene
+        if (rendererRef.current && sceneRef.current && cameraRef.current) {
+          rendererRef.current.render(sceneRef.current, cameraRef.current);
         }
       };
       
+      // Start the animation loop immediately
       animate();
 
       // Signal that the scene is ready
@@ -263,7 +261,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         if (cleanupFn) cleanupFn();
       });
     };
-  }, [gameState]);
+  }, []);
 
   // Function to register update functions from child components - this is memoized
   const registerUpdate = useCallback((updateFn: IdentifiableFunction) => {
@@ -275,14 +273,15 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     };
   }, []);
 
-  // Handle character position updates
+  // Make the handleCharacterPositionUpdate more efficient
   const handleCharacterPositionUpdate = useCallback((position: THREE.Vector3) => {
+    // Directly update the reference without creating a new Vector3
     if (characterPositionRef.current) {
-      // Make sure to create a clean copy to avoid reference issues
       characterPositionRef.current.copy(position);
     }
   }, []);
 
+  // Handle mobile controls
   // Handle joystick movement for mobile
   const handleJoystickMove = useCallback((x: number, y: number) => {
     // Map joystick values to WASD keys
@@ -310,8 +309,28 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     }, 100);
   }, []);
 
+  // Handle attack action for mobile
+  const handleAttack = useCallback(() => {
+    console.log("Mobile: Attack button pressed");
+    
+    // First directly simulate a right-click for attack animation
+    const rightClickEvent = new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true,
+      button: 2 // Right-click
+    });
+    window.dispatchEvent(rightClickEvent);
+    
+    // Follow up with direct access to shoot functionality if available
+    if (characterControllerRef.current) {
+      console.log("Mobile: Notifying character controller of attack intent");
+    }
+  }, []);
+
   // Handle shoot button press (for water spear)
   const handleShoot = useCallback(() => {
+    console.log("Mobile: Shoot button pressed");
+    
     // Simulate right-click to shoot water spear
     const event = new MouseEvent('mousedown', {
       bubbles: true,
@@ -323,27 +342,40 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
   // Handle water bending start
   const handleWaterBendStart = useCallback(() => {
+    console.log("Mobile: Water bend start");
+    
     // Set waterBending flag to true
     isBendingRef.current = true;
+    
+    // Simulate left-click press for bending
+    const mouseDownEvent = new MouseEvent('mousedown', {
+      bubbles: true,
+      cancelable: true,
+      button: 0 // Left-click
+    });
+    window.dispatchEvent(mouseDownEvent);
   }, [isBendingRef]);
 
   // Handle water bending end
   const handleWaterBendEnd = useCallback(() => {
     // Set waterBending flag to false
     isBendingRef.current = false;
+    
+    // Simulate left-click release
+    const mouseUpEvent = new MouseEvent('mouseup', {
+      bubbles: true,
+      cancelable: true,
+      button: 0 // Left-click
+    });
+    window.dispatchEvent(mouseUpEvent);
   }, [isBendingRef]);
 
-  // Add effect to handle gameState changes separately from scene initialization
-  useEffect(() => {
-    // Update game state in the animation loop when it changes
-    if (rendererRef.current) {
-      // If we're switching from paused to playing on mobile, make sure the camera looks right
-      if (gameState === 'playing' && isMobile && cameraRef.current) {
-        // Reset camera rotation flags to let it be automatically positioned
-        cameraRef.current.userData.hasBeenRotatedByUser = false;
-      }
+  // Function to update water status from WaterBending to CharacterController
+  const handleUpdateWaterStatus = useCallback((hasEnoughWater: boolean) => {
+    if (characterControllerRef.current) {
+      characterControllerRef.current.updateWaterStatus(hasEnoughWater);
     }
-  }, [gameState, isMobile]);
+  }, []);
 
   return (
     <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'relative' }}>
@@ -380,6 +412,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             camera={cameraRef.current}
             onPositionUpdate={handleCharacterPositionUpdate}
             world={worldRef.current}
+            ref={characterControllerRef}
           />
 
           <CameraController
@@ -402,6 +435,15 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             crosshairPositionRef={crosshairPositionRef}
             characterPositionRef={characterPositionRef}
             world={worldRef.current}
+            updateWaterStatus={handleUpdateWaterStatus}
+            characterControllerRef={characterControllerRef}
+          />
+
+          {/* Add PortalManager component */}
+          <PortalManager 
+            scene={sceneRef.current}
+            characterPositionRef={characterPositionRef}
+            registerUpdate={registerUpdate}
           />
 
           {/* Show mobile controls only on mobile devices when game is playing */}
@@ -411,10 +453,14 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
               onJoystickEnd={handleJoystickEnd}
               onJump={handleJump}
               onShoot={handleShoot}
+              onAttack={handleAttack}
               onWaterBendStart={handleWaterBendStart}
               onWaterBendEnd={handleWaterBendEnd}
             />
           )}
+
+          {/* Add HealthBar component */}
+          <HealthBar characterControllerRef={characterControllerRef} gameState={gameState} />
         </>
       )}
     </div>

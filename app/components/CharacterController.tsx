@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Character from './Character';
+import React from 'react';
 
 type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string
@@ -24,14 +25,22 @@ interface CharacterControllerProps {
   world: CANNON.World; // Add Cannon.js world
 }
 
-export default function CharacterController({
+// Define the ref type for external access
+export interface CharacterControllerRef {
+  updateWaterStatus: (hasEnoughWater: boolean) => void;
+  takeDamage: (amount: number) => void;
+  getCurrentHealth: () => number;
+}
+
+// Convert to forwardRef component
+const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterControllerProps, 'gameState'>>(function CharacterController({
   scene,
   keysRef,
   registerUpdate,
   camera,
   onPositionUpdate,
-  world
-}: CharacterControllerProps) {
+  world,
+}, ref) {
   const characterRef = useRef<THREE.Group | null>(null);
   const velocityRef = useRef<THREE.Vector3 | null>(null);
   const onGroundRef = useRef(true);
@@ -44,6 +53,56 @@ export default function CharacterController({
   // Track last ground state for debugging
   const lastGroundStateRef = useRef<boolean>(true);
   const currentAnimationRef = useRef<string | null>(null);
+  // Add refs for attack and bending animations
+  const isAttackingRef = useRef<boolean>(false);
+  const attackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isBendingRef = useRef<boolean>(false);
+  // Reference to track water amount for animations
+  const hasEnoughWaterRef = useRef<boolean>(false);
+  // Add health tracking
+  const [health, setHealth] = useState<number>(250); // Base health of 250 HP
+  const [isInvulnerable, setIsInvulnerable] = useState<boolean>(false);
+  const lastDamageTimeRef = useRef<number>(0);
+  const invulnerabilityDuration = 500; // 500ms invulnerability after taking damage
+  // Add a ref to track if we're considering this a "bending" session
+  const wasBendingRef = useRef<boolean>(false);
+
+  // Expose the methods via ref
+  useImperativeHandle(ref, () => ({
+    updateWaterStatus: (hasEnoughWater: boolean) => {
+      hasEnoughWaterRef.current = hasEnoughWater;
+    },
+    takeDamage: (amount: number) => {
+      const now = Date.now();
+      // Check if character is currently invulnerable
+      if (isInvulnerable && now - lastDamageTimeRef.current < invulnerabilityDuration) {
+        return;
+      }
+      
+      lastDamageTimeRef.current = now;
+      setIsInvulnerable(true);
+      
+      // Set invulnerability timer
+      setTimeout(() => {
+        setIsInvulnerable(false);
+      }, invulnerabilityDuration);
+      
+      // Apply damage
+      setHealth(prevHealth => {
+        const newHealth = Math.max(0, prevHealth - amount);
+        console.log(`Character took ${amount} damage. Health: ${newHealth}/${250}`);
+        
+        // Handle death if health reaches 0
+        if (newHealth <= 0) {
+          console.log("Character has died!");
+          // Could trigger death animation or respawn logic here
+        }
+        
+        return newHealth;
+      });
+    },
+    getCurrentHealth: () => health
+  }), [health, isInvulnerable]);
 
   // --- Add State/Memo for Stable Props ---
   // Restore useMemo for production build stability
@@ -167,8 +226,9 @@ export default function CharacterController({
           ' ': boolean;
         }>;
 
-        // Debug movement - only when keys are pressed
         const isMoving = keys.current.w || keys.current.a || keys.current.s || keys.current.d;
+
+        // Debug movement - only when keys are pressed
         if (isMoving && Math.floor(Date.now() / 500) % 2 === 0) {
           // Removed console.log
         }
@@ -235,24 +295,40 @@ export default function CharacterController({
         let nextAnimation = 'idle'; // Default to idle
         const characterBody = characterBodyRef.current; // Alias for easier access
         
-        if (!onGroundRef.current) {
-            nextAnimation = 'jumping';
-        } else if (isMoving) {
-            // Calculate horizontal speed
+        if (!characterBody) {
+          // console.warn("CharacterController update: characterBodyRef is null, skipping animation logic.");
+          return; // Exit if body doesn't exist
+        }
+        
+        // Priority-based animation state machine
+        // 1. Attacking takes highest priority
+        if (isAttackingRef.current) {
+          nextAnimation = 'attack';
+        }
+        // 2. Bending takes next priority
+        else if (isBendingRef.current) {
+          nextAnimation = 'bending';
+        }
+        // 3. Jumping takes next priority
+        else if (!onGroundRef.current) {
+          nextAnimation = 'jumping';
+        }
+        // 4. Movement animations take lowest priority
+        else if (isMoving) { // Use the isMoving declared earlier
             const speed = new THREE.Vector3(characterBody.velocity.x, 0, characterBody.velocity.z).length();
-            if (speed > 15) { // Adjust threshold as needed for running
+            if (speed > 15) { 
                 nextAnimation = 'running';
             } else {
                 nextAnimation = 'walking';
             }
         }
         
-        // Check if the character model exists and has the playAnimation method
         const characterModel = characterRef.current as (THREE.Group & { playAnimation?: (name: string, fade: number) => void }) | null;
 
         if (characterModel?.playAnimation && nextAnimation !== currentAnimationRef.current) {
-            console.log(`Switching animation from ${currentAnimationRef.current} to ${nextAnimation}`);
-            characterModel.playAnimation(nextAnimation, 0.3); // Play with fade
+            // LOG BEFORE playing animation
+            console.log(`CharacterController: Switching animation from "${currentAnimationRef.current}" to "${nextAnimation}"`); 
+            characterModel.playAnimation(nextAnimation, 0.3); 
             currentAnimationRef.current = nextAnimation;
         }
         // --- End Animation State Machine ---
@@ -313,6 +389,122 @@ export default function CharacterController({
     setupCharacter();
   }, [scene, keysRef, registerUpdate, camera, onPositionUpdate, world, initialPosition]);
 
+  // Add useEffect to handle mouse events for animations
+  useEffect(() => {
+    if (!scene) return;
+
+    // Helper to trigger attack animation if we have enough water
+    const triggerAttackAnimation = () => {
+      if (hasEnoughWaterRef.current && !isAttackingRef.current) {
+        // Cancel any existing attack timeout
+        if (attackTimeoutRef.current) {
+          clearTimeout(attackTimeoutRef.current);
+        }
+        
+        console.log("Triggering attack animation!"); // Debug log
+        
+        // Set attacking state
+        isAttackingRef.current = true;
+        
+        // Reset attack state after animation duration
+        attackTimeoutRef.current = setTimeout(() => {
+          isAttackingRef.current = false;
+          console.log("Attack animation finished"); // Debug log
+        }, 1000);
+      } else {
+        console.log("Cannot attack: hasEnoughWater=", hasEnoughWaterRef.current, "isAttacking=", isAttackingRef.current); // Debug log
+      }
+    };
+
+    // Handle left click for bending
+    const handleLeftClick = (event: MouseEvent) => {
+      if (event.button === 0) {
+        isBendingRef.current = true;
+        wasBendingRef.current = true; // Mark that this session started with bending
+        console.log("Bending started - left click held"); // Debug log
+      }
+    };
+    
+    // Handle right click for attack
+    const handleRightClick = (event: MouseEvent) => {
+      if (event.button === 2) {
+        console.log("Right click detected!"); // Debug log
+        triggerAttackAnimation();
+        
+        // Don't prevent default - let WaterBending handle shooting
+      }
+    };
+    
+    // Handle mouse up - end bending when left click released
+    const handleMouseUp = (event: MouseEvent) => {
+      if (event.button === 0) {
+        isBendingRef.current = false;
+        
+        // Reset the bending flag after a short delay to prevent immediate click detection
+        setTimeout(() => {
+          wasBendingRef.current = false;
+        }, 300); // A little longer than the click timeout
+        
+        console.log("Bending ended - left click released"); // Debug log
+      }
+    };
+    
+    // Handle single left-click for attack as well
+    const handleSingleClick = () => {
+      let clickTimeout: NodeJS.Timeout | null = null;
+      let clickCount = 0;
+      
+      return (event: MouseEvent) => {
+        if (event.button === 0) {
+          clickCount++;
+          
+          if (clickCount === 1) {
+            clickTimeout = setTimeout(() => {
+              if (clickCount === 1) {
+                // Single click detected (not part of double click)
+                // Only trigger attack if this wasn't the end of a bending action
+                if (!wasBendingRef.current) {
+                  triggerAttackAnimation();
+                } else {
+                  console.log("Ignoring attack trigger after bending"); // Debug log
+                }
+              }
+              clickCount = 0;
+            }, 200); // Short timeout to detect single vs double click
+          }
+        }
+      };
+    };
+    
+    // Create the single click handler
+    const singleClickHandler = handleSingleClick();
+
+    // Add event listeners with explicit event capturing
+    window.addEventListener('mousedown', handleLeftClick, { capture: true });
+    window.addEventListener('mousedown', handleRightClick, { capture: true });
+    window.addEventListener('mouseup', handleMouseUp, { capture: true });
+    window.addEventListener('click', singleClickHandler, { capture: true });
+    
+    // For right-click context menu
+    const preventContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('contextmenu', preventContextMenu);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('mousedown', handleLeftClick, { capture: true });
+      window.removeEventListener('mousedown', handleRightClick, { capture: true });
+      window.removeEventListener('mouseup', handleMouseUp, { capture: true });
+      window.removeEventListener('click', singleClickHandler, { capture: true });
+      window.removeEventListener('contextmenu', preventContextMenu);
+      
+      if (attackTimeoutRef.current) {
+        clearTimeout(attackTimeoutRef.current);
+      }
+    };
+  }, [scene]);
+
   // --- Wrap handleModelLoaded in useCallback ---
   const handleModelLoaded = useCallback((model: THREE.Group) => {
     // Log the UUID of the model received by the controller
@@ -348,18 +540,24 @@ export default function CharacterController({
     } else {
        console.log(`CharacterController handleModelLoaded: No initial characterPositionRef for UUID: ${model.uuid}`);
     }
-     // Add dependencies for useCallback
-  }, [characterScale]); // Add characterScale to dependencies
-  // ------------------------------------------
+  }, []); // Remove characterScale dependency to ensure stability
+
+  // Store stable position value for Character to avoid re-renders
+  const stablePosition = useMemo(() => {
+    // Return either the current position or the initial position
+    return characterPositionRef.current ? characterPositionRef.current.clone() : initialPosition;
+  }, []); // Empty dependency array ensures this only runs once
 
   return (
     <Character
       scene={scene}
-      onModelLoaded={handleModelLoaded} // Pass the memoized callback
-      // Pass stable position reference (ref should be set by the time Character mounts ideally)
-      position={characterPositionRef.current ?? initialPosition}
-      scale={characterScale} // Pass the stable scale vector
+      onModelLoaded={handleModelLoaded}
+      position={stablePosition} // Use stable position reference
+      scale={characterScale}
       registerUpdate={registerUpdate}
     />
   );
-} 
+});
+
+// Export the memoized version of CharacterController
+export default CharacterController; 

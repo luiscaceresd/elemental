@@ -20,6 +20,25 @@ export default function GameWrapper() {
   const pointerLockRequestedRef = useRef(false);
   const pointerLockTimerRef = useRef<number | null>(null);
 
+  // Preload the GameCanvas component as soon as GameWrapper mounts
+  useEffect(() => {
+    import('./GameCanvas');
+  }, []);
+
+  // Check if coming from a portal and skip start screen if needed
+  useEffect(() => {
+    // Check for portal parameter in URL
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromPortal = urlParams.get('fromPortal') === 'true';
+      
+      // If coming from a portal, skip straight to playing state
+      if (fromPortal) {
+        setGameState('playing');
+      }
+    }
+  }, []);
+
   // Check if device is mobile
   useEffect(() => {
     const checkMobile = () => {
@@ -180,18 +199,21 @@ export default function GameWrapper() {
       {gameState === 'start' && <StartScreen onStart={handleStartGame} />}
 
       {(gameState === 'playing' || gameState === 'paused') && (
-        <div className={gameState === 'paused' ? 'game-paused' : ''}>
-          <GameCanvas gameState={gameState} />
-          {gameState === 'playing' && (
-            <PauseButton
-              onPause={handlePauseGame}
-              isMobile={isMobile}
-            />
-          )}
-          {gameState === 'paused' && (
-            <PauseMenu onResume={handleResumeGame} onExit={handleExitGame} />
-          )}
-        </div>
+        <>
+          <div className={gameState === 'paused' ? 'game-paused' : ''}>
+            <GameCanvas gameState={gameState} />
+            {gameState === 'playing' && (
+              <PauseButton
+                onPause={handlePauseGame}
+                isMobile={isMobile}
+              />
+            )}
+            {gameState === 'paused' && (
+              <PauseMenu onResume={handleResumeGame} onExit={handleExitGame} />
+            )}
+          </div>
+          <a target="_blank" href="https://jam.pieter.com" style={{ fontFamily: "'system-ui', sans-serif", position: 'fixed', bottom: -1, right: -1, padding: '7px', fontSize: '14px', fontWeight: 'bold', background: '#fff', color: '#000', textDecoration: 'none', zIndex: 10000, borderTopLeftRadius: '12px', border: '1px solid #fff' }}>🕹️ Vibe Jam 2025</a>
+        </>
       )}
     </>
   );

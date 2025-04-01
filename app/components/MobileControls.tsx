@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import ActionButton from './ActionButton';
 
 interface MobileControlsProps {
   onJoystickMove: (x: number, y: number) => void;
   onJoystickEnd: () => void;
   onJump: () => void;
   onShoot?: () => void;
+  onAttack?: () => void;
   onWaterBendStart?: () => void;
   onWaterBendEnd?: () => void;
 }
@@ -123,83 +125,6 @@ function Joystick({
   );
 }
 
-// Improved action button component for both Jump and Shoot buttons
-function ActionButton({
-  id,
-  onClick,
-  label,
-  color,
-  position,
-  isPortrait
-}: {
-  id: string;
-  onClick: () => void;
-  label: string;
-  color: string;
-  position: 'left' | 'right';
-  isPortrait: boolean;
-}) {
-  // Calculate button position based on orientation and position
-  const getPosition = () => {
-    if (position === 'right') {
-      // JUMP button (right)
-      return {
-        right: isPortrait ? '30px' : '30px',
-        bottom: isPortrait ? '100px' : '80px'
-      };
-    } else {
-      // SHOOT button (left) - position higher on screen
-      return {
-        right: isPortrait ? '240px' : '200px', // Move further to the right (was 140px/120px)
-        bottom: isPortrait ? '150px' : '130px'
-      };
-    }
-  };
-
-  const buttonPos = getPosition();
-  
-  // Button style with responsive positioning
-  const buttonStyle = {
-    position: 'absolute',
-    bottom: buttonPos.bottom,
-    right: buttonPos.right,
-    width: isPortrait ? '100px' : '80px',
-    height: isPortrait ? '100px' : '80px',
-    borderRadius: '50%',
-    background: color,
-    border: 'none',
-    color: 'white',
-    fontSize: isPortrait ? '16px' : '14px',
-    fontWeight: 'bold',
-    zIndex: 1000,
-    cursor: 'pointer',
-    boxShadow: '0 0 15px rgba(0, 0, 0, 0.5)',
-    userSelect: 'none' as const,
-    touchAction: 'manipulation', // Improve touch handling
-    textShadow: '0 1px 2px rgba(0,0,0,0.5)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center'
-  } as const;
-
-  // Handle touch events with stopPropagation to prevent camera control interference
-  const handleButtonTouch = (e: React.TouchEvent) => {
-    e.stopPropagation(); // Prevent event from propagating to camera controls
-    onClick();
-  };
-
-  return (
-    <button
-      id={id}
-      className="hide-when-paused"
-      onTouchStart={handleButtonTouch}
-      style={buttonStyle}
-    >
-      {label}
-    </button>
-  );
-}
-
 // Water collection overlay - for press and hold anywhere 
 function WaterCollectionOverlay({
   onWaterBendStart,
@@ -229,11 +154,13 @@ function WaterCollectionOverlay({
   }, []); // Empty dependency array - only run once
   
   const handleTouchStart = () => {
+    console.log("WaterBending: Touch start detected");
     setIsCollecting(true);
     if (onWaterBendStart) onWaterBendStart();
   };
   
   const handleTouchEnd = () => {
+    console.log("WaterBending: Touch end detected");
     setIsCollecting(false);
     if (onWaterBendEnd) onWaterBendEnd();
   };
@@ -244,8 +171,8 @@ function WaterCollectionOverlay({
     left: 0,
     width: '100%',
     height: '100%',
-    zIndex: 800, // Lower than buttons but higher than camera area
-    pointerEvents: 'none' as const, // Initially doesn't block other interactions
+    zIndex: 950, // Higher than camera control area
+    pointerEvents: 'auto', // Always receive pointer events
   } as const;
   
   const hintStyle = {
@@ -278,7 +205,7 @@ function WaterCollectionOverlay({
     opacity: isCollecting ? 0.8 : 0,
     transition: 'opacity 0.2s ease',
     pointerEvents: 'none' as const,
-    zIndex: 850,
+    zIndex: 1000,
     boxShadow: '0 0 20px rgba(0, 191, 255, 0.8)',
     background: 'radial-gradient(circle, rgba(0,191,255,0.3) 0%, rgba(0,191,255,0) 70%)'
   } as const;
@@ -287,7 +214,7 @@ function WaterCollectionOverlay({
     <>
       <div 
         id="water-collection-overlay" 
-        style={{...overlayStyle, pointerEvents: 'auto'}}
+        style={overlayStyle}
         className="hide-when-paused"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -307,9 +234,13 @@ function WaterCollectionOverlay({
 
 // New camera control area component
 function CameraControlArea({ 
-  isPortrait
+  isPortrait,
+  onWaterBendStart,
+  onWaterBendEnd
 }: { 
   isPortrait: boolean;
+  onWaterBendStart?: () => void;
+  onWaterBendEnd?: () => void;
 }) {
   const cameraControlStyle = {
     position: 'absolute',
@@ -317,15 +248,29 @@ function CameraControlArea({
     right: '0',
     width: '50%',
     height: '100%',
-    zIndex: 900, // Lower than buttons but still interactive
+    zIndex: 900, // Lower than water overlay
     touchAction: 'none', // Prevent default touch actions like scrolling
   } as const;
+
+  // Forward water bending events to camera control area too
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // Let the event continue to propagate
+    if (onWaterBendStart) onWaterBendStart();
+  };
+  
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    // Let the event continue to propagate  
+    if (onWaterBendEnd) onWaterBendEnd();
+  };
 
   return (
     <div 
       id="camera-control-area" 
       style={cameraControlStyle} 
       className="hide-when-paused"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     />
   );
 }
@@ -334,34 +279,53 @@ export default function MobileControls({
   onJoystickMove,
   onJoystickEnd,
   onJump,
-  onShoot = () => {}, // Default empty function
-  onWaterBendStart = () => {}, // Default empty function
-  onWaterBendEnd = () => {} // Default empty function
+  onShoot = () => {}, // For water projectile (right click)
+  onAttack = () => {}, // For attack animation (any click with enough water)
+  onWaterBendStart = () => {}, // For water bending anim (left click hold)
+  onWaterBendEnd = () => {} // For ending bending animation
 }: MobileControlsProps) {
-  const [isPortrait, setIsPortrait] = useState(false);
-
-  // Check if we're in portrait mode for responsive positioning
+  const [isPortrait, setIsPortrait] = useState(true);
+  
+  // Check if we're in portrait mode
   useEffect(() => {
     const checkOrientation = () => {
       setIsPortrait(window.innerHeight > window.innerWidth);
     };
-
+    
+    // Initial check
     checkOrientation();
+    
+    // Listen for orientation changes
     window.addEventListener('resize', checkOrientation);
-    return () => window.removeEventListener('resize', checkOrientation);
+    window.addEventListener('orientationchange', checkOrientation);
+    
+    return () => {
+      window.removeEventListener('resize', checkOrientation);
+      window.removeEventListener('orientationchange', checkOrientation);
+    };
   }, []);
-
+  
+  // Combined handler for shoot+attack
+  const handleShootAndAttack = useCallback(() => {
+    // Call both handlers - the shoot handler will fire if there's enough water
+    // and the attack animation will play in sync
+    onShoot();
+    onAttack();
+  }, [onShoot, onAttack]);
+  
   return (
     <> 
-      {/* Water collection overlay (lowest z-index) */}
+      {/* Water collection overlay - for mobile water bending/collecting */}
       <WaterCollectionOverlay 
-        onWaterBendStart={onWaterBendStart}
-        onWaterBendEnd={onWaterBendEnd}
+        onWaterBendStart={onWaterBendStart} // Bending starts with touch & hold
+        onWaterBendEnd={onWaterBendEnd}     // Bending ends when touch released
       />
       
       {/* Camera control area - for right side of screen */}
       <CameraControlArea 
-        isPortrait={isPortrait} 
+        isPortrait={isPortrait}
+        onWaterBendStart={onWaterBendStart}
+        onWaterBendEnd={onWaterBendEnd}
       />
 
       {/* Joystick for movement - directly in the layout */}
@@ -370,9 +334,9 @@ export default function MobileControls({
         onEnd={onJoystickEnd} 
         isPortrait={isPortrait} 
       />
-
-      {/* Jump button - direct placement without container */}
-      <ActionButton 
+      
+      {/* Jump button */}
+      <ActionButton
         id="jump-button"
         onClick={onJump}
         label="JUMP"
@@ -381,14 +345,15 @@ export default function MobileControls({
         isPortrait={isPortrait}
       />
       
-      {/* Shoot button - direct placement without container */}
-      <ActionButton 
+      {/* Shoot button - combined shooting and attack */}
+      <ActionButton
         id="shoot-button"
-        onClick={onShoot}
-        label="SHOOT"
+        onClick={handleShootAndAttack} // Combined handler for shooting and attacking
+        label="ATTACK"
         color="rgba(255, 60, 60, 0.8)"
         position="left"
         isPortrait={isPortrait}
+        index={0}
       />
     </>
   );
