@@ -25,7 +25,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
   // Use a callback for device detection instead of useEffect
   const checkMobile = useCallback(() => {
     return typeof window !== 'undefined' &&
-      (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      (/AndrodBlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
         || window.innerWidth < 768);
   }, []);
 

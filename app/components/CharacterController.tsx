@@ -64,6 +64,8 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
   const [isInvulnerable, setIsInvulnerable] = useState<boolean>(false);
   const lastDamageTimeRef = useRef<number>(0);
   const invulnerabilityDuration = 500; // 500ms invulnerability after taking damage
+  // Add a ref to track if we're considering this a "bending" session
+  const wasBendingRef = useRef<boolean>(false);
 
   // Expose the methods via ref
   useImperativeHandle(ref, () => ({
@@ -418,6 +420,7 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
     const handleLeftClick = (event: MouseEvent) => {
       if (event.button === 0) {
         isBendingRef.current = true;
+        wasBendingRef.current = true; // Mark that this session started with bending
         console.log("Bending started - left click held"); // Debug log
       }
     };
@@ -436,6 +439,12 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
     const handleMouseUp = (event: MouseEvent) => {
       if (event.button === 0) {
         isBendingRef.current = false;
+        
+        // Reset the bending flag after a short delay to prevent immediate click detection
+        setTimeout(() => {
+          wasBendingRef.current = false;
+        }, 300); // A little longer than the click timeout
+        
         console.log("Bending ended - left click released"); // Debug log
       }
     };
@@ -453,7 +462,12 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
             clickTimeout = setTimeout(() => {
               if (clickCount === 1) {
                 // Single click detected (not part of double click)
-                triggerAttackAnimation();
+                // Only trigger attack if this wasn't the end of a bending action
+                if (!wasBendingRef.current) {
+                  triggerAttackAnimation();
+                } else {
+                  console.log("Ignoring attack trigger after bending"); // Debug log
+                }
               }
               clickCount = 0;
             }, 200); // Short timeout to detect single vs double click
