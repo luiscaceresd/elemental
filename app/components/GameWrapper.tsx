@@ -25,6 +25,20 @@ export default function GameWrapper() {
     import('./GameCanvas');
   }, []);
 
+  // Check if coming from a portal and skip start screen if needed
+  useEffect(() => {
+    // Check for portal parameter in URL
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromPortal = urlParams.get('fromPortal') === 'true';
+      
+      // If coming from a portal, skip straight to playing state
+      if (fromPortal) {
+        setGameState('playing');
+      }
+    }
+  }, []);
+
   // Check if device is mobile
   useEffect(() => {
     const checkMobile = () => {

@@ -9,6 +9,7 @@ import MobileControls from './MobileControls';
 import World from './World';
 import Pond from './Pond';
 import Crosshair from './Crosshair';
+import PortalManager from './PortalManager';
 import * as CANNON from 'cannon';
 
 // Add a type for functions with an identifier
@@ -434,6 +435,13 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             characterPositionRef={characterPositionRef}
             world={worldRef.current}
             updateWaterStatus={handleUpdateWaterStatus}
+          />
+
+          {/* Add PortalManager component */}
+          <PortalManager 
+            scene={sceneRef.current}
+            characterPositionRef={characterPositionRef}
+            registerUpdate={registerUpdate}
           />
 
           {/* Show mobile controls only on mobile devices when game is playing */}
