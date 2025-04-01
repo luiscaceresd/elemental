@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Character from './Character';
+import React from 'react';
 
 type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string
@@ -24,7 +25,7 @@ interface CharacterControllerProps {
   world: CANNON.World; // Add Cannon.js world
 }
 
-export default function CharacterController({
+function CharacterController({
   scene,
   keysRef,
   registerUpdate,
@@ -367,4 +368,7 @@ export default function CharacterController({
       registerUpdate={registerUpdate}
     />
   );
-} 
+}
+
+// Export the memoized version of CharacterController
+export default React.memo(CharacterController); 
