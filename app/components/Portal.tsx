@@ -102,7 +102,14 @@ const Portal: React.FC<PortalProps> = ({
       }
       
       if (innerCircleRef.current) {
-        innerCircleRef.current.material.opacity = 0.3 + Math.sin(Date.now() * 0.002) * 0.2; // Pulsing opacity
+        const material = innerCircleRef.current.material;
+        if (Array.isArray(material)) {
+          material.forEach(mat => {
+            mat.opacity = 0.3 + Math.sin(Date.now() * 0.002) * 0.2; // Pulsing opacity
+          });
+        } else {
+          material.opacity = 0.3 + Math.sin(Date.now() * 0.002) * 0.2; // Pulsing opacity
+        }
       }
     };
 

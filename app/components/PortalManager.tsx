@@ -7,7 +7,7 @@ import Portal from './Portal';
 interface PortalManagerProps {
   scene: THREE.Scene;
   characterPositionRef: React.MutableRefObject<THREE.Vector3>;
-  registerUpdate: (fn: (delta: number) => void) => void;
+  registerUpdate: (fn: (delta: number) => void) => (() => void) | void;
 }
 
 const PortalManager: React.FC<PortalManagerProps> = ({
@@ -144,7 +144,9 @@ const PortalManager: React.FC<PortalManagerProps> = ({
     const unregister = registerUpdate(checkPortalCollisions);
     
     return () => {
-      unregister();
+      if (typeof unregister === 'function') {
+        unregister();
+      }
     };
   }, [registerUpdate]);
 
