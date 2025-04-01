@@ -26,6 +26,7 @@ interface WaterBendingProps {
   crosshairPositionRef: React.MutableRefObject<THREE.Vector3>;
   characterPositionRef?: React.MutableRefObject<THREE.Vector3 | null>;
   world: CANNON.World;
+  updateWaterStatus?: (hasEnoughWater: boolean) => void;
 }
 
 // Define a WaterDrop type for our pool
@@ -60,7 +61,8 @@ export default function WaterBending({
   isBendingRef,
   crosshairPositionRef,
   characterPositionRef,
-  world
+  world,
+  updateWaterStatus
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
   const _mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2()); // Renamed with underscore to indicate intentionally unused
@@ -97,6 +99,14 @@ export default function WaterBending({
     const animationId = requestAnimationFrame(updateDisplayCount);
     return () => cancelAnimationFrame(animationId);
   }, []);
+
+  useEffect(() => {
+    // Update the character animation system when water status changes
+    if (updateWaterStatus) {
+      const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
+      updateWaterStatus(hasEnoughWater);
+    }
+  }, [displayedDrops, updateWaterStatus, REQUIRED_DROPS_TO_FIRE]);
 
   const returnSpearToPool = useCallback((spear: WaterSpear) => {
     if (!spear || !spearPoolRef.current.includes(spear)) {
@@ -367,6 +377,15 @@ export default function WaterBending({
       const createWaterSpear = () => {
         if (!characterPositionRef?.current) return;
         if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) return;
+        
+        // Update water status first
+        if (updateWaterStatus) {
+          updateWaterStatus(false);
+          setTimeout(() => {
+            updateWaterStatus(collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE);
+          }, 100);
+        }
+        
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
 
         // Helper: explosion effect – always trigger explosion on collision/lifetime
@@ -622,20 +641,31 @@ export default function WaterBending({
       // Input handlers
       const onMouseDown = (event: MouseEvent) => {
         if (event.button === 0) {
+          // Let the left-click event propagate for bending animation in CharacterController
           isBendingRef.current = true;
           updateCrosshairPosition();
         }
       };
+      
       const onMouseUp = (event: MouseEvent) => {
         if (event.button === 0) {
+          // Let the left-click release event propagate
           isBendingRef.current = false;
         }
       };
+      
       const onRightClick = (event: MouseEvent) => {
         if (event.button === 2) {
-          event.preventDefault();
+          console.log("WaterBending: Processing right click"); // Debug log
+
+          // Don't prevent default here - CharacterController needs to see this event
+          // event.preventDefault();
+          
           if (collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE) {
+            console.log("WaterBending: Creating water spear"); // Debug log
             createWaterSpear();
+          } else {
+            console.log("WaterBending: Not enough water to create spear"); // Debug log
           }
         }
       };
@@ -910,14 +940,20 @@ export default function WaterBending({
             }
           }
         }
+
+        // Update water status after collection
+        if (updateWaterStatus) {
+          const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
+          updateWaterStatus(hasEnoughWater);
+        }
       };
       updateBendingEffects._id = 'bendingVisualEffects';
       const removeEffectsUpdate = registerUpdate(updateBendingEffects);
 
-      // Add event listeners
-      window.addEventListener('mousedown', onMouseDown, { capture: true });
-      window.addEventListener('mouseup', onMouseUp, { capture: true });
-      window.addEventListener('mousedown', onRightClick, { capture: true });
+      // Add event listeners - don't use capture to let CharacterController handle events first
+      window.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mouseup', onMouseUp);
+      window.addEventListener('mousedown', onRightClick);
 
       return () => {
         // Cleanup (removing objects, disposing geometries/materials, and event listeners)
@@ -959,9 +995,9 @@ export default function WaterBending({
         removeEffectsUpdate();
         removeUpdateCrosshair();
         removeWaterDropsUpdate();
-        window.removeEventListener('mousedown', onRightClick, { capture: true });
-        window.removeEventListener('mousedown', onMouseDown, { capture: true });
-        window.removeEventListener('mouseup', onMouseUp, { capture: true });
+        window.removeEventListener('mousedown', onRightClick);
+        window.removeEventListener('mousedown', onMouseDown);
+        window.removeEventListener('mouseup', onMouseUp);
       };
     };
 
@@ -971,7 +1007,7 @@ export default function WaterBending({
         cleanupFn();
       }
     };
-  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool]);
+  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus]);
 
   return (
     <WaterMeter

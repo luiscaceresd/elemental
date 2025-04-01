@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Character from './Character';
@@ -25,14 +25,20 @@ interface CharacterControllerProps {
   world: CANNON.World; // Add Cannon.js world
 }
 
-function CharacterController({
+// Define the ref type for external access
+export interface CharacterControllerRef {
+  updateWaterStatus: (hasEnoughWater: boolean) => void;
+}
+
+// Convert to forwardRef component
+const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterControllerProps, 'gameState'>>(function CharacterController({
   scene,
   keysRef,
   registerUpdate,
   camera,
   onPositionUpdate,
   world,
-}: Omit<CharacterControllerProps, 'gameState'>) {
+}, ref) {
   const characterRef = useRef<THREE.Group | null>(null);
   const velocityRef = useRef<THREE.Vector3 | null>(null);
   const onGroundRef = useRef(true);
@@ -45,6 +51,19 @@ function CharacterController({
   // Track last ground state for debugging
   const lastGroundStateRef = useRef<boolean>(true);
   const currentAnimationRef = useRef<string | null>(null);
+  // Add refs for attack and bending animations
+  const isAttackingRef = useRef<boolean>(false);
+  const attackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isBendingRef = useRef<boolean>(false);
+  // Reference to track water amount for animations
+  const hasEnoughWaterRef = useRef<boolean>(false);
+
+  // Expose the updateWaterStatus method via ref
+  useImperativeHandle(ref, () => ({
+    updateWaterStatus: (hasEnoughWater: boolean) => {
+      hasEnoughWaterRef.current = hasEnoughWater;
+    }
+  }), []);
 
   // --- Add State/Memo for Stable Props ---
   // Restore useMemo for production build stability
@@ -242,9 +261,21 @@ function CharacterController({
           return; // Exit if body doesn't exist
         }
         
-        if (!onGroundRef.current) {
-            nextAnimation = 'jumping';
-        } else if (isMoving) { // Use the isMoving declared earlier
+        // Priority-based animation state machine
+        // 1. Attacking takes highest priority
+        if (isAttackingRef.current) {
+          nextAnimation = 'attack';
+        }
+        // 2. Bending takes next priority
+        else if (isBendingRef.current) {
+          nextAnimation = 'bending';
+        }
+        // 3. Jumping takes next priority
+        else if (!onGroundRef.current) {
+          nextAnimation = 'jumping';
+        }
+        // 4. Movement animations take lowest priority
+        else if (isMoving) { // Use the isMoving declared earlier
             const speed = new THREE.Vector3(characterBody.velocity.x, 0, characterBody.velocity.z).length();
             if (speed > 15) { 
                 nextAnimation = 'running';
@@ -319,6 +350,110 @@ function CharacterController({
     setupCharacter();
   }, [scene, keysRef, registerUpdate, camera, onPositionUpdate, world, initialPosition]);
 
+  // Add useEffect to handle mouse events for animations
+  useEffect(() => {
+    if (!scene) return;
+
+    // Helper to trigger attack animation if we have enough water
+    const triggerAttackAnimation = () => {
+      if (hasEnoughWaterRef.current && !isAttackingRef.current) {
+        // Cancel any existing attack timeout
+        if (attackTimeoutRef.current) {
+          clearTimeout(attackTimeoutRef.current);
+        }
+        
+        console.log("Triggering attack animation!"); // Debug log
+        
+        // Set attacking state
+        isAttackingRef.current = true;
+        
+        // Reset attack state after animation duration
+        attackTimeoutRef.current = setTimeout(() => {
+          isAttackingRef.current = false;
+          console.log("Attack animation finished"); // Debug log
+        }, 1000);
+      } else {
+        console.log("Cannot attack: hasEnoughWater=", hasEnoughWaterRef.current, "isAttacking=", isAttackingRef.current); // Debug log
+      }
+    };
+
+    // Handle left click for bending
+    const handleLeftClick = (event: MouseEvent) => {
+      if (event.button === 0) {
+        isBendingRef.current = true;
+        console.log("Bending started - left click held"); // Debug log
+      }
+    };
+    
+    // Handle right click for attack
+    const handleRightClick = (event: MouseEvent) => {
+      if (event.button === 2) {
+        console.log("Right click detected!"); // Debug log
+        triggerAttackAnimation();
+        
+        // Don't prevent default - let WaterBending handle shooting
+      }
+    };
+    
+    // Handle mouse up - end bending when left click released
+    const handleMouseUp = (event: MouseEvent) => {
+      if (event.button === 0) {
+        isBendingRef.current = false;
+        console.log("Bending ended - left click released"); // Debug log
+      }
+    };
+    
+    // Handle single left-click for attack as well
+    const handleSingleClick = () => {
+      let clickTimeout: NodeJS.Timeout | null = null;
+      let clickCount = 0;
+      
+      return (event: MouseEvent) => {
+        if (event.button === 0) {
+          clickCount++;
+          
+          if (clickCount === 1) {
+            clickTimeout = setTimeout(() => {
+              if (clickCount === 1) {
+                // Single click detected (not part of double click)
+                triggerAttackAnimation();
+              }
+              clickCount = 0;
+            }, 200); // Short timeout to detect single vs double click
+          }
+        }
+      };
+    };
+    
+    // Create the single click handler
+    const singleClickHandler = handleSingleClick();
+
+    // Add event listeners with explicit event capturing
+    window.addEventListener('mousedown', handleLeftClick, { capture: true });
+    window.addEventListener('mousedown', handleRightClick, { capture: true });
+    window.addEventListener('mouseup', handleMouseUp, { capture: true });
+    window.addEventListener('click', singleClickHandler, { capture: true });
+    
+    // For right-click context menu
+    const preventContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener('contextmenu', preventContextMenu);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('mousedown', handleLeftClick, { capture: true });
+      window.removeEventListener('mousedown', handleRightClick, { capture: true });
+      window.removeEventListener('mouseup', handleMouseUp, { capture: true });
+      window.removeEventListener('click', singleClickHandler, { capture: true });
+      window.removeEventListener('contextmenu', preventContextMenu);
+      
+      if (attackTimeoutRef.current) {
+        clearTimeout(attackTimeoutRef.current);
+      }
+    };
+  }, [scene]);
+
   // --- Wrap handleModelLoaded in useCallback ---
   const handleModelLoaded = useCallback((model: THREE.Group) => {
     // Log the UUID of the model received by the controller
@@ -368,7 +503,7 @@ function CharacterController({
       registerUpdate={registerUpdate}
     />
   );
-}
+});
 
 // Export the memoized version of CharacterController
-export default React.memo(CharacterController); 
+export default CharacterController; 
