@@ -45,7 +45,9 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     d: false,
     ' ': false
   });
-  const characterPositionRef = useRef<THREE.Vector3 | null>(null);
+  
+  // Use a stable reference for character position to avoid re-renders
+  const characterPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 1, 5));
   const updateFunctionsRef = useRef<IdentifiableFunction[]>([]);
 
   // New refs for waterbending
@@ -154,9 +156,6 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
       // Add fog for atmospheric depth
       scene.fog = new THREE.Fog(0x87CEFA, 70, 300); // Increased distance for better visibility
-
-      // Initialize character position reference
-      characterPositionRef.current = new THREE.Vector3(0, 1, 5);
 
       // Handle keyboard inputs for PC controls
       const onKeyDown = (event: KeyboardEvent) => {
@@ -272,10 +271,10 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
     };
   }, []);
 
-  // Handle character position updates
+  // Make the handleCharacterPositionUpdate more efficient
   const handleCharacterPositionUpdate = useCallback((position: THREE.Vector3) => {
+    // Directly update the reference without creating a new Vector3
     if (characterPositionRef.current) {
-      // Make sure to create a clean copy to avoid reference issues
       characterPositionRef.current.copy(position);
     }
   }, []);

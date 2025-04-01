@@ -489,17 +489,20 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
     } else {
        console.log(`CharacterController handleModelLoaded: No initial characterPositionRef for UUID: ${model.uuid}`);
     }
-     // Add dependencies for useCallback
-  }, [characterScale]); // Add characterScale to dependencies
-  // ------------------------------------------
+  }, []); // Remove characterScale dependency to ensure stability
+
+  // Store stable position value for Character to avoid re-renders
+  const stablePosition = useMemo(() => {
+    // Return either the current position or the initial position
+    return characterPositionRef.current ? characterPositionRef.current.clone() : initialPosition;
+  }, []); // Empty dependency array ensures this only runs once
 
   return (
     <Character
       scene={scene}
-      onModelLoaded={handleModelLoaded} // Pass the memoized callback
-      // Pass stable position reference (ref should be set by the time Character mounts ideally)
-      position={characterPositionRef.current ?? initialPosition}
-      scale={characterScale} // Pass the stable scale vector
+      onModelLoaded={handleModelLoaded}
+      position={stablePosition} // Use stable position reference
+      scale={characterScale}
       registerUpdate={registerUpdate}
     />
   );

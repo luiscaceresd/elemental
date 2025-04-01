@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { AnimationMixer, AnimationAction, AnimationClip } from 'three';
 import { GLTF } from 'three/examples/jsm/loaders/GLTFLoader';
+import React from 'react';
 
 type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string;
@@ -19,7 +20,7 @@ interface CharacterProps {
   registerUpdate?: (updateFn: IdentifiableFunction) => () => void;
 }
 
-export default function Character({
+function Character({
   scene,
   onModelLoaded,
   position = new THREE.Vector3(0, 0, 0),
@@ -31,15 +32,18 @@ export default function Character({
   const mixerRef = useRef<AnimationMixer | null>(null);
   const actionsRef = useRef<{ [key: string]: AnimationAction }>({});
   const [isLoaded, setIsLoaded] = useState(false);
+  const initialLoadedRef = useRef(false); // Track if we've already loaded the model
+  const instanceIdRef = useRef(Math.random().toString(36).substring(7)); // Stable instance ID
 
+  // Handle model loading - only depend on scene to prevent recreation
   useEffect(() => {
-    const instanceId = Math.random().toString(36).substring(7);
-    console.log(`Character.tsx useEffect START - Instance: ${instanceId}`);
-
-    if (modelRef.current) {
-      console.log(`Character.tsx useEffect - Already loaded, returning. Instance: ${instanceId}`);
+    // Early exit if we already have a loaded model
+    if (initialLoadedRef.current && modelRef.current) {
+      console.log(`Character.tsx useEffect - Already loaded, returning. Instance: ${instanceIdRef.current}`);
       return;
     }
+
+    console.log(`Character.tsx useEffect START - Instance: ${instanceIdRef.current}`);
 
     const loadModel = async () => {
       try {
@@ -88,9 +92,13 @@ export default function Character({
           }
         });
 
+        // Save model reference before adding to scene
         modelRef.current = model;
+        
+        // Add model to scene
         scene.add(model);
 
+        // Setup animation mixer once
         const mixer = new THREE.AnimationMixer(model);
         mixerRef.current = mixer;
         actionsRef.current = {};
@@ -117,11 +125,18 @@ export default function Character({
           console.warn('No animations available to autoplay.');
         }
 
+        // Mark as loaded before calling onModelLoaded
+        initialLoadedRef.current = true;
+        setIsLoaded(true);
+
+        // Attach playAnimation method to model
+        const typedModel = model as THREE.Group & { playAnimation?: typeof playAnimation };
+        typedModel.playAnimation = playAnimation;
+
         if (onModelLoaded) {
-          console.log(`Character.tsx - Calling onModelLoaded. Instance: ${instanceId}, UUID: ${model.uuid}`);
+          console.log(`Character.tsx - Calling onModelLoaded. Instance: ${instanceIdRef.current}, UUID: ${model.uuid}`);
           onModelLoaded(model);
         }
-        setIsLoaded(true);
       } catch (loadError) {
         console.error('Failed during model loading:', loadError);
       }
@@ -129,22 +144,23 @@ export default function Character({
 
     loadModel();
 
+    // This cleanup only runs when unmounting
     return () => {
-      const currentModelUUID = modelRef.current?.uuid;
-      console.log(`Character.tsx useEffect CLEANUP - Instance: ${instanceId}, Model UUID: ${currentModelUUID}`);
       if (modelRef.current) {
-        console.log(`Character.tsx CLEANUP - Removing model UUID: ${modelRef.current.uuid}`);
+        console.log(`Character.tsx FINAL CLEANUP - Removing model UUID: ${modelRef.current.uuid}`);
         scene.remove(modelRef.current);
         modelRef.current = null;
         mixerRef.current = null;
         actionsRef.current = {};
+        initialLoadedRef.current = false;
       }
       const dracoLoader = new DRACOLoader();
       dracoLoader.dispose();
     };
-  }, [scene, onModelLoaded, position, scale, registerUpdate]);
+  }, [scene]); // Only depend on scene
 
-  const playAnimation = (animationName: string, fadeInTime: number = 0.5) => {
+  // Stable playAnimation function that doesn't get recreated on rerenders
+  const playAnimation = useCallback((animationName: string, fadeInTime: number = 0.5) => {
     const lowerCaseName = animationName.toLowerCase();
     const targetAction = actionsRef.current[lowerCaseName];
 
@@ -167,8 +183,9 @@ export default function Character({
     console.log(`Character.tsx: Fading in action: ${lowerCaseName}`);
     targetAction.reset().fadeIn(fadeInTime).play();
     console.log(`Character.tsx: Action "${lowerCaseName}" play() called.`);
-  };
+  }, []); // No dependencies to ensure stability
 
+  // Setup animation update loop
   useEffect(() => {
     if (!scene || !registerUpdate || !isLoaded) return;
 
@@ -184,15 +201,16 @@ export default function Character({
     return () => {
       unregisterUpdate();
     };
-  }, [scene, isLoaded]);
+  }, [scene, isLoaded, registerUpdate]);
 
+  // Handle position updates without recreating the model
   useEffect(() => {
-    if (!modelRef.current || !isLoaded) return;
+    if (modelRef.current && position) {
+      modelRef.current.position.copy(position);
+    }
+  }, [position]);
 
-    const model = modelRef.current as THREE.Group & { playAnimation?: typeof playAnimation };
-    model.playAnimation = playAnimation;
-  }, [isLoaded]);
-
+  // Handle scale updates without recreating the model
   useEffect(() => {
     if (modelRef.current && scale) {
       console.log('Character.tsx: Scale useEffect - Applying new scale:', scale.x, scale.y, scale.z);
@@ -202,3 +220,6 @@ export default function Character({
 
   return null;
 }
+
+// Use React.memo to prevent unnecessary re-renders
+export default React.memo(Character);
