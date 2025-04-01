@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import ActionButton from './ActionButton';
 
 interface MobileControlsProps {
@@ -305,6 +305,14 @@ export default function MobileControls({
     };
   }, []);
   
+  // Combined handler for shoot+attack
+  const handleShootAndAttack = useCallback(() => {
+    // Call both handlers - the shoot handler will fire if there's enough water
+    // and the attack animation will play in sync
+    onShoot();
+    onAttack();
+  }, [onShoot, onAttack]);
+  
   return (
     <> 
       {/* Water collection overlay - for mobile water bending/collecting */}
@@ -337,26 +345,15 @@ export default function MobileControls({
         isPortrait={isPortrait}
       />
       
-      {/* Shoot button - for water projectile */}
+      {/* Shoot button - combined shooting and attack */}
       <ActionButton
         id="shoot-button"
-        onClick={onShoot} // Triggers water projectile (right click)
-        label="SHOOT"
+        onClick={handleShootAndAttack} // Combined handler for shooting and attacking
+        label="ATTACK"
         color="rgba(255, 60, 60, 0.8)"
         position="left"
         isPortrait={isPortrait}
         index={0}
-      />
-      
-      {/* Attack button - new button for standalone attack animation */}
-      <ActionButton
-        id="attack-button"
-        onClick={onAttack} // Triggers attack animation if enough water
-        label="ATTACK"
-        color="rgba(255, 165, 0, 0.8)" // Orange color for attack
-        position="left"
-        isPortrait={isPortrait}
-        index={1} // Position below shoot button
       />
     </>
   );
