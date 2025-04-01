@@ -154,11 +154,13 @@ function WaterCollectionOverlay({
   }, []); // Empty dependency array - only run once
   
   const handleTouchStart = () => {
+    console.log("WaterBending: Touch start detected");
     setIsCollecting(true);
     if (onWaterBendStart) onWaterBendStart();
   };
   
   const handleTouchEnd = () => {
+    console.log("WaterBending: Touch end detected");
     setIsCollecting(false);
     if (onWaterBendEnd) onWaterBendEnd();
   };
@@ -169,8 +171,8 @@ function WaterCollectionOverlay({
     left: 0,
     width: '100%',
     height: '100%',
-    zIndex: 800, // Lower than buttons but higher than camera area
-    pointerEvents: 'none' as const, // Initially doesn't block other interactions
+    zIndex: 950, // Higher than camera control area
+    pointerEvents: 'auto', // Always receive pointer events
   } as const;
   
   const hintStyle = {
@@ -203,7 +205,7 @@ function WaterCollectionOverlay({
     opacity: isCollecting ? 0.8 : 0,
     transition: 'opacity 0.2s ease',
     pointerEvents: 'none' as const,
-    zIndex: 850,
+    zIndex: 1000,
     boxShadow: '0 0 20px rgba(0, 191, 255, 0.8)',
     background: 'radial-gradient(circle, rgba(0,191,255,0.3) 0%, rgba(0,191,255,0) 70%)'
   } as const;
@@ -212,7 +214,7 @@ function WaterCollectionOverlay({
     <>
       <div 
         id="water-collection-overlay" 
-        style={{...overlayStyle, pointerEvents: 'auto'}}
+        style={overlayStyle}
         className="hide-when-paused"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -232,9 +234,13 @@ function WaterCollectionOverlay({
 
 // New camera control area component
 function CameraControlArea({ 
-  isPortrait
+  isPortrait,
+  onWaterBendStart,
+  onWaterBendEnd
 }: { 
   isPortrait: boolean;
+  onWaterBendStart?: () => void;
+  onWaterBendEnd?: () => void;
 }) {
   const cameraControlStyle = {
     position: 'absolute',
@@ -242,15 +248,29 @@ function CameraControlArea({
     right: '0',
     width: '50%',
     height: '100%',
-    zIndex: 900, // Lower than buttons but still interactive
+    zIndex: 900, // Lower than water overlay
     touchAction: 'none', // Prevent default touch actions like scrolling
   } as const;
+
+  // Forward water bending events to camera control area too
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // Let the event continue to propagate
+    if (onWaterBendStart) onWaterBendStart();
+  };
+  
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    // Let the event continue to propagate  
+    if (onWaterBendEnd) onWaterBendEnd();
+  };
 
   return (
     <div 
       id="camera-control-area" 
       style={cameraControlStyle} 
       className="hide-when-paused"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     />
   );
 }
@@ -295,7 +315,9 @@ export default function MobileControls({
       
       {/* Camera control area - for right side of screen */}
       <CameraControlArea 
-        isPortrait={isPortrait} 
+        isPortrait={isPortrait}
+        onWaterBendStart={onWaterBendStart}
+        onWaterBendEnd={onWaterBendEnd}
       />
 
       {/* Joystick for movement - directly in the layout */}
