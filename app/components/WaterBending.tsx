@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Hammer from 'hammerjs';
 import WaterMeter from './WaterMeter';
+import { CharacterControllerRef } from './CharacterController';
 
 // Extend the type definitions for CANNON.World to include missing methods
 declare module 'cannon' {
@@ -27,6 +28,7 @@ interface WaterBendingProps {
   characterPositionRef?: React.MutableRefObject<THREE.Vector3 | null>;
   world: CANNON.World;
   updateWaterStatus?: (hasEnoughWater: boolean) => void;
+  characterControllerRef?: React.RefObject<CharacterControllerRef | null>;
 }
 
 // Define a WaterDrop type for our pool
@@ -48,6 +50,7 @@ interface WaterSpear {
   hasExploded?: boolean; // NEW: tracks if the spear has exploded
   initialVelocity?: THREE.Vector3; // For bullet-like travel
   _updateId?: string; // ID of the update function for this spear
+  shooterId?: string; // Added shooter ID
 }
 
 // Debug flag to show water source detection
@@ -62,7 +65,8 @@ export default function WaterBending({
   crosshairPositionRef,
   characterPositionRef,
   world,
-  updateWaterStatus
+  updateWaterStatus,
+  characterControllerRef
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
   const _mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2()); // Renamed with underscore to indicate intentionally unused
@@ -540,6 +544,10 @@ export default function WaterBending({
         const maxLifetime = 10000;
         const creationTime = Date.now();
 
+        // Store the ID of the character who fired this spear to prevent self-damage
+        const shooterId = 'player'; // In a multiplayer game, this would be a unique player ID
+        pooledSpear.shooterId = shooterId;
+
         // Update function for the spear projectile
         const updateSpear: IdentifiableFunction = (delta: number) => {
           if (!pooledSpear.body) {
@@ -602,22 +610,54 @@ export default function WaterBending({
         };
 
         // Always trigger explosion on any collision
-        spearBody.addEventListener('collide', (/* _event */) => { // Changed to a comment inside the parameter list 
+        spearBody.addEventListener('collide', (event: { type: string; body: CANNON.Body; contact: CANNON.ContactEquation; }) => { 
           if (!pooledSpear.body) return;
-          if (!pooledSpear.hasExploded) {
-            pooledSpear.hasExploded = true;
-            // Trigger immediate visual explosion
-            triggerExplosion(spearGroup.position.clone());
-            // Create water drops
-            createExplosionEffect(spearGroup.position.clone());
+          if (pooledSpear.hasExploded) return;
+          
+          // Get the collided body
+          const collidedBody = event.body;
+          
+          // Mark as exploded to prevent multiple explosions
+          pooledSpear.hasExploded = true;
+          
+          // Trigger immediate visual explosion
+          triggerExplosion(spearGroup.position.clone());
+          
+          // Create water drops
+          createExplosionEffect(spearGroup.position.clone());
+
+          // Inflict damage on characters in an area
+          // Find all characters in the explosion radius (except the shooter)
+          const DAMAGE_AMOUNT = 60; // 60 HP damage
+          const EXPLOSION_RADIUS = 5; // 5 units radius (not too big, as requested)
+          const explosionPosition = spearGroup.position.clone();
+          
+          // Check if the player character is close to the explosion
+          if (characterControllerRef?.current && characterPositionRef?.current) {
+            // Calculate distance to explosion
+            const distanceToPlayer = explosionPosition.distanceTo(characterPositionRef.current);
+            
+            // Check if within explosion radius AND not the shooter (to prevent self-damage)
+            if (distanceToPlayer < EXPLOSION_RADIUS && pooledSpear.shooterId !== 'player') {
+              // Apply damage based on proximity (full damage at center, less at edge)
+              const damageMultiplier = 1 - (distanceToPlayer / EXPLOSION_RADIUS);
+              const actualDamage = Math.floor(DAMAGE_AMOUNT * damageMultiplier);
+              
+              // Apply damage to the character
+              if (actualDamage > 0) {
+                characterControllerRef.current.takeDamage(actualDamage);
+              }
+            }
           }
           
+          // Remove the spear physics body
           const body = pooledSpear.body;
           setTimeout(() => {
             if (body) world.removeBody(body);
           }, 50);
           pooledSpear.body = undefined;
           
+          // Return the spear to the pool
           setTimeout(() => {
             returnSpearToPool(pooledSpear);
             removeSpearUpdate();
@@ -1007,7 +1047,7 @@ export default function WaterBending({
         cleanupFn();
       }
     };
-  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus]);
+  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus, characterControllerRef]);
 
   return (
     <WaterMeter

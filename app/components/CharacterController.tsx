@@ -28,6 +28,8 @@ interface CharacterControllerProps {
 // Define the ref type for external access
 export interface CharacterControllerRef {
   updateWaterStatus: (hasEnoughWater: boolean) => void;
+  takeDamage: (amount: number) => void;
+  getCurrentHealth: () => number;
 }
 
 // Convert to forwardRef component
@@ -57,13 +59,48 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
   const isBendingRef = useRef<boolean>(false);
   // Reference to track water amount for animations
   const hasEnoughWaterRef = useRef<boolean>(false);
+  // Add health tracking
+  const [health, setHealth] = useState<number>(250); // Base health of 250 HP
+  const [isInvulnerable, setIsInvulnerable] = useState<boolean>(false);
+  const lastDamageTimeRef = useRef<number>(0);
+  const invulnerabilityDuration = 500; // 500ms invulnerability after taking damage
 
-  // Expose the updateWaterStatus method via ref
+  // Expose the methods via ref
   useImperativeHandle(ref, () => ({
     updateWaterStatus: (hasEnoughWater: boolean) => {
       hasEnoughWaterRef.current = hasEnoughWater;
-    }
-  }), []);
+    },
+    takeDamage: (amount: number) => {
+      const now = Date.now();
+      // Check if character is currently invulnerable
+      if (isInvulnerable && now - lastDamageTimeRef.current < invulnerabilityDuration) {
+        return;
+      }
+      
+      lastDamageTimeRef.current = now;
+      setIsInvulnerable(true);
+      
+      // Set invulnerability timer
+      setTimeout(() => {
+        setIsInvulnerable(false);
+      }, invulnerabilityDuration);
+      
+      // Apply damage
+      setHealth(prevHealth => {
+        const newHealth = Math.max(0, prevHealth - amount);
+        console.log(`Character took ${amount} damage. Health: ${newHealth}/${250}`);
+        
+        // Handle death if health reaches 0
+        if (newHealth <= 0) {
+          console.log("Character has died!");
+          // Could trigger death animation or respawn logic here
+        }
+        
+        return newHealth;
+      });
+    },
+    getCurrentHealth: () => health
+  }), [health, isInvulnerable]);
 
   // --- Add State/Memo for Stable Props ---
   // Restore useMemo for production build stability

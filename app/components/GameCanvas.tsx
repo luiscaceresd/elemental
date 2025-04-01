@@ -10,6 +10,7 @@ import World from './World';
 import Pond from './Pond';
 import Crosshair from './Crosshair';
 import PortalManager from './PortalManager';
+import HealthBar from './HealthBar';
 import * as CANNON from 'cannon';
 
 // Add a type for functions with an identifier
@@ -435,6 +436,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             characterPositionRef={characterPositionRef}
             world={worldRef.current}
             updateWaterStatus={handleUpdateWaterStatus}
+            characterControllerRef={characterControllerRef}
           />
 
           {/* Add PortalManager component */}
@@ -456,6 +458,9 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
               onWaterBendEnd={handleWaterBendEnd}
             />
           )}
+
+          {/* Add HealthBar component */}
+          <HealthBar characterControllerRef={characterControllerRef} gameState={gameState} />
         </>
       )}
     </div>
