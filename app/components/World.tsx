@@ -6,6 +6,7 @@ import * as THREE from 'three';
 // import { createNoise2D } from 'simplex-noise';
 import Tree from './Tree';
 import Pond from './Pond';
+import NPC from './NPC';
 import * as CANNON from 'cannon';
 
 interface WorldProps {
@@ -14,11 +15,14 @@ interface WorldProps {
   crosshairPositionRef: React.MutableRefObject<THREE.Vector3>;
   registerUpdate: (updateFn: ((delta: number) => void) & { _id?: string }) => () => void;
   world: CANNON.World;
+  characterPositionRef: React.MutableRefObject<THREE.Vector3>;
+  gameState: 'playing' | 'paused';
 }
 
-export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate, world }: WorldProps) {
+export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate, world, characterPositionRef, gameState }: WorldProps) {
   const [treePositions, setTreePositions] = useState<THREE.Vector3[]>([]);
   const [pondPositions, setPondPositions] = useState<{ position: THREE.Vector3, size: number, depth: number }[]>([]);
+  const [npcPosition] = useState<THREE.Vector3>(new THREE.Vector3(5, 1, 8)); // Near player start position (0, 1, 5)
 
   useEffect(() => {
     if (world) { /* Using world */ }
@@ -219,7 +223,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
     return () => { cleanupPromise.then(cleanupFn => cleanupFn && cleanupFn()); };
   }, [scene, registerUpdate, world]);
 
-  // Render Trees and Ponds separately
+  // Render Trees, Ponds, and NPC
   return (
     <>
       {treePositions.map((pos, index) => (
@@ -228,7 +232,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
       {pondPositions.map((pond, index) => (
         <Pond
           key={`pond-${index}`}
-          position={pond.position} // Positioned at y=0
+          position={pond.position}
           size={pond.size}
           depth={pond.depth}
           scene={scene}
@@ -237,6 +241,16 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
           registerUpdate={registerUpdate}
         />
       ))}
+      <NPC 
+        scene={scene} 
+        position={npcPosition} 
+        world={world} 
+        color="#cc3366" 
+        size={1.2} 
+        characterPositionRef={characterPositionRef}
+        registerUpdate={registerUpdate}
+        gameState={gameState}
+      />
     </>
   );
 }

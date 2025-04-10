@@ -391,6 +391,8 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             crosshairPositionRef={crosshairPositionRef}
             registerUpdate={registerUpdate}
             world={worldRef.current}
+            characterPositionRef={characterPositionRef}
+            gameState={gameState}
           />
 
           {/* Add pond directly (not needed if already added in World) */}

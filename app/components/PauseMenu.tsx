@@ -127,7 +127,7 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
 
   return (
     <div
-      className={`fixed inset-0 flex flex-col justify-end items-center z-50 transition-opacity duration-500 ${fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
+      className={`fixed inset-0 flex flex-col justify-end items-center z-[1000] transition-opacity duration-500 ${fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
     >
       {/* Background Images - separate desktop and mobile versions */}
