@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
+import { RealtimeChat } from '@/components/realtime-chat';
 
 interface NPCProps {
   scene: THREE.Scene;
@@ -30,6 +31,10 @@ const NPC: React.FC<NPCProps> = ({
   const indicatorRef = useRef<THREE.Group | null>(null);
   const [isPlayerNearby, setIsPlayerNearby] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  
+  // Generate a consistent username based on a prefix and a random suffix
+  const [username] = useState(() => `player_${Math.floor(Math.random() * 10000)}`);
   
   // Check if mobile
   useEffect(() => {
@@ -165,10 +170,15 @@ const NPC: React.FC<NPCProps> = ({
     if (!characterPositionRef || !registerUpdate) return;
     
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'g' && isPlayerNearby) {
+      if (event.key.toLowerCase() === 'g' && isPlayerNearby && gameState === 'playing') {
         console.log('Interacting with NPC');
-        // Add your interaction code here
-        alert('Hello traveler! I am an NPC.');
+        // Show chat interface instead of alert
+        setShowChat(true);
+      }
+      
+      // Add escape key to close chat
+      if (event.key === 'Escape' && showChat) {
+        setShowChat(false);
       }
     };
     
@@ -176,7 +186,7 @@ const NPC: React.FC<NPCProps> = ({
     
     // Mobile tap interaction
     const handleTap = (event: MouseEvent | TouchEvent) => {
-      if (!isMobile || !isPlayerNearby || !npcRef.current) return;
+      if (!isMobile || !isPlayerNearby || !npcRef.current || gameState !== 'playing') return;
       
       // Get the tap position
       const mouse = new THREE.Vector2();
@@ -198,7 +208,8 @@ const NPC: React.FC<NPCProps> = ({
         
         if (intersects.length > 0) {
           console.log('Tapped on NPC');
-          alert('Hello traveler! I am an NPC.');
+          // Show chat interface instead of alert
+          setShowChat(true);
         }
       }
     };
@@ -214,11 +225,11 @@ const NPC: React.FC<NPCProps> = ({
       const distanceToPlayer = characterPositionRef.current.distanceTo(npcRef.current.position);
       const playerIsNearby = distanceToPlayer < 5; // 5 units interaction radius
       
-      // Update indicator visibility
-      indicatorRef.current.visible = playerIsNearby;
+      // Update indicator visibility (only when chat is not open)
+      indicatorRef.current.visible = playerIsNearby && !showChat && gameState === 'playing';
       
       // Animate indicator (bounce)
-      if (playerIsNearby) {
+      if (playerIsNearby && !showChat && gameState === 'playing') {
         indicatorRef.current.position.y = position.y + size * 2 + Math.sin(Date.now() * 0.003) * 0.2;
         
         // Always face camera but maintain vertical orientation of the exclamation mark
@@ -247,12 +258,25 @@ const NPC: React.FC<NPCProps> = ({
       window.removeEventListener('click', handleTap);
       window.removeEventListener('touchend', handleTap);
     };
-  }, [scene, position, size, characterPositionRef, registerUpdate, isPlayerNearby, isMobile]);
+  }, [scene, position, size, characterPositionRef, registerUpdate, isPlayerNearby, isMobile, gameState, showChat]);
 
-  // Add interaction hint UI only when game is not paused
+  // Initial chat messages for NPC
+  const initialMessages = [
+    {
+      id: '1',
+      content: 'Hello traveler! I am an NPC in this world.',
+      user: {
+        name: 'Guide'
+      },
+      createdAt: new Date().toISOString()
+    }
+  ];
+
+  // Add interaction hint UI and chat component when appropriate
   return (
     <>
-      {isPlayerNearby && gameState === 'playing' && (
+      {/* Interaction hint - only shown when nearby, game is playing, and chat isn't open */}
+      {isPlayerNearby && gameState === 'playing' && !showChat && (
         <div 
           style={{
             position: 'fixed',
@@ -275,6 +299,55 @@ const NPC: React.FC<NPCProps> = ({
           ) : (
             <span>Press <strong>G</strong> to interact with NPC</span>
           )}
+        </div>
+      )}
+
+      {/* Chat component - shown when interaction is started */}
+      {showChat && gameState === 'playing' && (
+        <div 
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            width: '360px',
+            height: '480px',
+            zIndex: 200,
+            borderRadius: '12px',
+            overflow: 'hidden',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
+          }}
+        >
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            padding: '10px 16px',
+            backgroundColor: '#111',
+            color: 'white',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)'
+          }}>
+            <h3 style={{ margin: 0, fontSize: '16px' }}>Guide</h3>
+            <button 
+              onClick={() => setShowChat(false)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'white',
+                cursor: 'pointer',
+                fontSize: '18px',
+                padding: '4px 8px',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <div style={{ height: 'calc(100% - 43px)' }}>
+            <RealtimeChat
+              roomName="npc-guide-chat"
+              username={username}
+              messages={initialMessages}
+            />
+          </div>
         </div>
       )}
     </>
