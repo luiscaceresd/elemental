@@ -1,0 +1,226 @@
+---
+description: Guidelines for managing game states and player interactions in the Elemental game
+globs: ["**/components/**/*.{tsx,ts}"]
+alwaysApply: false
+---
+
+# Game State Management Guidelines
+
+## Overview
+This rule defines standards for managing different game states and their interactions in the Elemental game. It covers main game states, chatting states, UI visibility, and proper input handling based on the current state.
+
+## Core Game States
+
+1. **Main Game States**:
+   - `start`: Initial game screen before gameplay begins
+   - `playing`: Active gameplay state where character can move and interact
+   - `paused`: Game is temporarily halted, showing pause menu
+   
+2. **Secondary States**:
+   - `chatting`: Player is interacting with an NPC (tracked via `isChattingRef`)
+   - `bending`: Player is performing waterbending (tracked via `isBendingRef`)
+   - `attacking`: Player is performing an attack action
+
+## State Management Implementation
+
+1. **Game State Storage**:
+   - Use `useState` for primary states (`gameState` in `GameWrapper`).
+   - Use `useRef` for secondary states (`isChattingRef`, `isBendingRef`) when direct, mutable access across renders is needed without causing re-renders, especially for frequent updates within the animation loop or event handlers.
+   - Prefer lifting state up (e.g., managing `waterLevels` in `GameCanvas`) over using refs for cross-component communication when the consuming component needs to re-render based on the state change (like `GameUI` needing updated `waterLevels`).
+
+   ```typescript
+   // Main game state in GameWrapper
+   const [gameState, setGameState] = useState<'start' | 'playing' | 'paused'>('start');
+   
+   // Secondary states (refs) in GameCanvas
+   const isChattingRef = useRef<boolean>(false);
+   const isBendingRef = useRef<boolean>(false);
+
+   // Lifted state in GameCanvas for UI updates
+   const [waterLevels, setWaterLevels] = useState({ current: 0, max: 450, required: 45 });
+   ```
+
+2. **State Propagation & Updates**: 
+   - **Refs**: Pass refs down as props directly (`isChattingRef={isChattingRef}`). Updates happen by mutating `ref.current`. Ensure the parent component managing the ref receives updates back if necessary (e.g., via callbacks or effects in the child synchronizing with the parent). 
+   - **Lifted State**: Pass state values down as props (`waterLevels={waterLevels}`). Use callback functions defined in the parent (`handleWaterUpdate`) and passed down as props (`onWaterUpdate={handleWaterUpdate}`) for children to trigger state updates in the parent.
+
+   ```typescript
+   // Parent (GameCanvas.tsx)
+   const [waterLevels, setWaterLevels] = useState(/* ... */);
+   const isChattingRef = useRef(false);
+
+   const handleWaterUpdate = useCallback((current, max, required) => {
+     setWaterLevels({ current, max, required });
+   }, []);
+
+   return (
+     <>
+       <WaterBending 
+         onWaterUpdate={handleWaterUpdate} 
+         isChattingRef={isChattingRef} 
+         /* other props */ 
+       />
+       <GameUI 
+         waterLevels={waterLevels} 
+         /* other props */ 
+       />
+        <NPC 
+          isChattingRef={isChattingRef} 
+          /* other props */ 
+        />
+     </>
+   );
+
+   // Child (WaterBending.tsx)
+   function WaterBending({ onWaterUpdate, isChattingRef, /* ... */ }) {
+     // ...
+     const triggerWaterUpdate = useCallback(() => {
+       onWaterUpdate(collectedDropsRef.current, MAX_WATER_DROPS, REQUIRED_DROPS_TO_FIRE);
+     }, [onWaterUpdate, /* ... */]);
+
+     // Call triggerWaterUpdate when water level changes
+     // ...
+   }
+   ```
+
+3. **State Update Responsibility**: The component *owning* the state (where `useState` or `useRef` is defined) should be responsible for updating it, either directly or through callbacks passed to children.
+
+## UI Behavior Based on State
+
+1. **Z-Index Hierarchy**:
+   - Chat interfaces: 20000+
+   - Game UI elements: 10000+
+   - Game controls: 1000+
+   - Game world elements: <1000
+   
+2. **Element Visibility**:
+   - When `chatting`: Show chat interface, hide crosshair, show cursor
+   - When `paused`: Show pause menu, hide gameplay controls
+   - When `playing` (not chatting): Show crosshair, hide cursor
+
+3. **Mobile-Specific UI**:
+   - Use touch-friendly buttons for interactions
+   - Position UI elements away from screen edges
+   - Adjust size and spacing for touch targets
+   ```typescript
+   {isMobile ? (
+     <button className="npc-interact-button">Interact with NPC</button>
+   ) : (
+     <span>Press <strong>G</strong> to interact</span>
+   )}
+   ```
+
+## Input Handling
+
+1. **Keyboard Input**:
+   - Block movement keys (WASD) when `chatting` or `paused`
+   - 'G' key opens NPC chat when near an NPC
+   - Escape closes chat or pauses game
+   - Enter sends chat messages when chatting
+   
+   ```typescript
+   const onKeyDown = (event: KeyboardEvent) => {
+     // Don't process movement keys if chatting
+     if (isChattingRef.current) {
+       return;
+     }
+     
+     // Normal input handling
+   };
+   ```
+
+2. **Mouse Input**:
+   - Prevent camera movement when `chatting`
+   - Release pointer lock when `chatting` begins
+   - Block right-click context menu in game
+   
+   ```typescript
+   // Check chatting state before applying camera movement
+   if (isChattingRef?.current && controls.isLocked) {
+     controls.unlock();
+   }
+   ```
+
+3. **Touch Input**:
+   - Disable joystick controls when `chatting`
+   - Use explicit interact buttons rather than raycasting for mobile
+   - Ensure touch elements have high enough z-index
+
+## NPC Interaction
+
+1. **Proximity Detection**:
+   - Set interaction radius (5 units is standard)
+   - Show indicator only when close enough to interact
+   
+   ```typescript
+   const distanceToPlayer = characterPositionRef.current.distanceTo(npcRef.current.position);
+   const playerIsNearby = distanceToPlayer < 5; // 5 units interaction radius
+   ```
+
+2. **Interaction Indicators**:
+   - Show interaction prompt when player is in range
+   - Hide prompt when chatting begins
+   - Make indicators prominent but non-intrusive
+
+3. **Chat Interface**:
+   - Position appropriately (bottom right on desktop, centered on mobile)
+   - Auto-focus input field
+   - Make chat interface semi-transparent
+   - Add clear close button
+
+## Examples
+
+### Good: Proper State Checking (using Ref)
+
+```typescript
+// In GameCanvas animation loop
+const animate = () => {
+  // Only update physics if playing AND NOT chatting
+  if (gameState === 'playing' && !isChattingRef.current) { // Check ref directly
+    const delta = clock.getDelta();
+    updateFunctionsRef.current.forEach(update => update(delta));
+  }
+  // Always render the scene
+  renderer.render(scene, camera);
+};
+```
+
+### Good: Callback for Lifted State Update
+
+```typescript
+// Parent Component (e.g., GameCanvas)
+const [waterLevels, setWaterLevels] = useState(/* ... */);
+
+const handleWaterUpdate = useCallback((current, max, required) => {
+  setWaterLevels({ current, max, required });
+}, []);
+
+return <WaterBending onWaterUpdate={handleWaterUpdate} /* ... */ />;
+
+// Child Component (e.g., WaterBending)
+function WaterBending({ onWaterUpdate, /* ... */ }) {
+  // When water amount changes...
+  onWaterUpdate(newAmount, maxAmount, requiredAmount);
+}
+```
+
+### Bad: Trying to Update Parent State Directly from Child Ref
+
+```typescript
+// BAD - Child should not directly mutate parent state or unrelated refs
+function WaterBending({ isChattingRef /* Prop from parent */ }) {
+  // ...
+  const handleSomeAction = () => {
+    // Don't do this! Let parent handle chat state changes
+    // isChattingRef.current = true; 
+  };
+}
+```
+
+## References
+
+- `app/components/GameWrapper.tsx`: Main game state (`gameState`)
+- `app/components/GameCanvas.tsx`: Secondary refs (`isChattingRef`, `isBendingRef`), Lifted state (`waterLevels`), Callbacks (`handleWaterUpdate`)
+- `app/components/NPC.tsx`: Consumes `isChattingRef`
+- `app/components/WaterBending.tsx`: Calls `onWaterUpdate` callback
+- `app/components/GameUI.tsx`: Consumes `waterLevels` state 

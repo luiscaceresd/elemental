@@ -6,9 +6,10 @@ import Image from 'next/image';
 interface PauseMenuProps {
   onResume: () => void;
   onExit: () => void;
+  isChattingRef?: React.MutableRefObject<boolean>;
 }
 
-export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
+export default function PauseMenu({ onResume, onExit, isChattingRef }: PauseMenuProps) {
   const [fadeOut, setFadeOut] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const resumeButtonRef = useRef<HTMLButtonElement>(null);
@@ -25,6 +26,9 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
 
   // Handle resume button click - wrap in useCallback to prevent recreation on each render
   const handleResume = useCallback(() => {
+    // Don't do anything if chatting
+    if (isChattingRef?.current) return;
+    
     setFadeOut(true);
     // Delay the onResume callback to allow for fade out animation
     setTimeout(() => {
@@ -44,16 +48,19 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
         }, 100);
       }
     }, 500);
-  }, [onResume, isMobile]);
+  }, [onResume, isMobile, isChattingRef]);
 
   // Handle exit button click - wrap in useCallback to prevent recreation on each render
   const handleExit = useCallback(() => {
+    // Don't do anything if chatting
+    if (isChattingRef?.current) return;
+    
     setFadeOut(true);
     // Delay the onExit callback to allow for fade out animation
     setTimeout(() => {
       onExit();
     }, 500);
-  }, [onExit]);
+  }, [onExit, isChattingRef]);
 
   // Add direct touch event handlers for mobile
   useEffect(() => {
@@ -64,12 +71,18 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
     const exitButton = exitButtonRef.current;
 
     const handleResumeTouch = (e: TouchEvent) => {
+      // Don't do anything if chatting
+      if (isChattingRef?.current) return;
+      
       e.preventDefault();
       e.stopPropagation();
       handleResume();
     };
 
     const handleExitTouch = (e: TouchEvent) => {
+      // Don't do anything if chatting
+      if (isChattingRef?.current) return;
+      
       e.preventDefault();
       e.stopPropagation();
       handleExit();
@@ -91,7 +104,22 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
         exitButton.removeEventListener('touchstart', handleExitTouch);
       }
     };
-  }, [isMobile, handleResume, handleExit]);
+  }, [isMobile, handleResume, handleExit, isChattingRef]);
+
+  // Add keyboard event handler for ESC and Enter keys
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't do anything if chatting is active
+      if (isChattingRef?.current) return;
+      
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        handleResume();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleResume, isChattingRef]);
 
   // Auto-focus the resume button when component mounts
   useEffect(() => {
@@ -127,7 +155,7 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
 
   return (
     <div
-      className={`fixed inset-0 flex flex-col justify-end items-center z-50 transition-opacity duration-500 ${fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
+      className={`fixed inset-0 flex flex-col justify-end items-center z-[1000] transition-opacity duration-500 ${fadeOut ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
     >
       {/* Background Images - separate desktop and mobile versions */}
@@ -227,4 +255,4 @@ export default function PauseMenu({ onResume, onExit }: PauseMenuProps) {
       </div>
     </div>
   );
-} 
+}

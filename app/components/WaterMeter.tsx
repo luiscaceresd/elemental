@@ -6,36 +6,18 @@ interface WaterMeterProps {
   currentWater: number;
   maxWater: number;
   requiredWater: number;
+  isMobile?: boolean;
 }
 
 const WaterMeter: React.FC<WaterMeterProps> = ({
   currentWater,
   maxWater,
-  requiredWater
+  requiredWater,
+  isMobile
 }) => {
-  // Add pulse animation when enough water is collected
   const [pulseEffect, setPulseEffect] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Check if device is mobile
-  useEffect(() => {
-    const checkMobile = () => {
-      return typeof window !== 'undefined' &&
-        (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-          || window.innerWidth < 768);
-    };
-
-    const handleResize = () => {
-      setIsMobile(checkMobile());
-    };
-
-    setIsMobile(checkMobile());
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   useEffect(() => {
-    // Trigger pulse effect when enough water is collected
     if (currentWater >= requiredWater) {
       setPulseEffect(true);
       const timer = setTimeout(() => setPulseEffect(false), 1000);
@@ -43,54 +25,27 @@ const WaterMeter: React.FC<WaterMeterProps> = ({
     }
   }, [currentWater, requiredWater]);
 
-  // Calculate if player has enough water to fire
   const canFire = currentWater >= requiredWater;
   const fillPercentage = Math.min(100, (currentWater / maxWater) * 100);
 
-  // Different position and style for mobile vs desktop
-  const mobileStyle: CSSProperties = {
-    position: 'absolute',
-    top: '80px', // Position below the pause button
-    right: '20px',
+  const baseStyle: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    padding: '8px', // Smaller padding on mobile
+    padding: isMobile ? '8px' : '10px',
     borderRadius: '8px',
     color: 'white',
     fontFamily: 'Arial, sans-serif',
-    zIndex: 100,
     boxShadow: canFire ? '0 0 15px rgba(0, 255, 255, 0.5)' : 'none',
     transition: 'box-shadow 0.3s ease',
     animation: pulseEffect ? 'pulse 1s ease-in-out' : 'none',
-    // Make it slightly more compact for mobile
-    transform: 'scale(0.9)',
-    transformOrigin: 'top right',
-    maxWidth: '180px' // Limit width on mobile
-  };
-
-  const desktopStyle: CSSProperties = {
-    position: 'absolute',
-    bottom: '20px',
-    right: '20px',
-    display: 'flex',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    padding: '10px',
-    borderRadius: '8px',
-    color: 'white',
-    fontFamily: 'Arial, sans-serif',
-    zIndex: 100,
-    boxShadow: canFire ? '0 0 15px rgba(0, 255, 255, 0.5)' : 'none',
-    transition: 'box-shadow 0.3s ease',
-    animation: pulseEffect ? 'pulse 1s ease-in-out' : 'none'
+    transform: isMobile ? 'scale(0.9)' : 'scale(1)',
+    transformOrigin: 'bottom center',
+    width: 'fit-content',
   };
 
   return (
-    <div
-      className="hide-when-paused"
-      style={isMobile ? mobileStyle : desktopStyle}
-    >
+    <div style={baseStyle} className="water-meter-container">
       <div style={{
         width: isMobile ? '25px' : '30px',
         height: isMobile ? '25px' : '30px',
@@ -124,7 +79,7 @@ const WaterMeter: React.FC<WaterMeterProps> = ({
           )}
         </div>
         <div style={{
-          width: isMobile ? '120px' : '160px',
+          width: isMobile ? '100px' : '160px',
           height: '8px',
           backgroundColor: 'rgba(255, 255, 255, 0.3)',
           borderRadius: '4px',

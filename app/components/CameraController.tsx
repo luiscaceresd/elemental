@@ -18,6 +18,7 @@ interface CameraControllerProps {
   distance?: number; // Distance behind character
   height?: number; // Height above character
   isMobile?: boolean; // Whether device is mobile
+  isChattingRef?: React.MutableRefObject<boolean>;
 }
 
 export default function CameraController({
@@ -29,7 +30,8 @@ export default function CameraController({
   sensitivity = 0.3, // Default sensitivity
   distance = 10, // Default distance
   height = 2, // Default height
-  isMobile = false
+  isMobile = false,
+  isChattingRef
 }: CameraControllerProps) {
   const controlsRef = useRef<PointerLockControls | null>(null);
   const controlObjectRef = useRef<THREE.Object3D | null>(null);
@@ -80,7 +82,8 @@ export default function CameraController({
 
         // Touch event handlers
         const onTouchStart = (event: TouchEvent) => {
-          if (cameraLockedRef.current) return;
+          // Don't handle camera controls if chatting
+          if (cameraLockedRef.current || isChattingRef?.current) return;
 
           for (let i = 0; i < event.changedTouches.length; i++) {
             const touch = event.changedTouches[i];
@@ -94,7 +97,8 @@ export default function CameraController({
         };
 
         const onTouchMove = (event: TouchEvent) => {
-          if (cameraLockedRef.current || cameraControlTouchId.current === null) return;
+          // Don't handle camera controls if chatting
+          if (cameraLockedRef.current || cameraControlTouchId.current === null || isChattingRef?.current) return;
 
           for (let i = 0; i < event.changedTouches.length; i++) {
             const touch = event.changedTouches[i];
@@ -176,7 +180,7 @@ export default function CameraController({
 
         // Request pointer lock on click
         const onClick = () => {
-          if (!cameraLockedRef.current) {
+          if (!cameraLockedRef.current && !isChattingRef?.current) {
             controls.lock();
           }
         };
@@ -186,6 +190,10 @@ export default function CameraController({
         const onPointerLockChange = () => {
           if (document.pointerLockElement === domElement) {
             // Pointer is now locked
+            // If chat starts while locked, unlock immediately
+            if (isChattingRef?.current && controls.isLocked) {
+              controls.unlock();
+            }
           } else {
             // Pointer is now unlocked
             controls.unlock();
@@ -194,9 +202,21 @@ export default function CameraController({
 
         document.addEventListener('pointerlockchange', onPointerLockChange);
 
+        // Set up a check to release lock when chatting begins
+        const exitLockWhenChatting = () => {
+          if (isChattingRef?.current && controls.isLocked) {
+            controls.unlock();
+            document.exitPointerLock();
+          }
+        };
+
+        // Add an interval to continuously check chat state
+        const chatStateCheckInterval = setInterval(exitLockWhenChatting, 100);
+
         cleanupFunctions.push(() => {
           domElement.removeEventListener('click', onClick);
           document.removeEventListener('pointerlockchange', onPointerLockChange);
+          clearInterval(chatStateCheckInterval);
           controls.dispose();
         });
       }
@@ -206,7 +226,10 @@ export default function CameraController({
       const heightOffsetFromCharacter = height;
 
       // Update function to position camera (same for both mobile and desktop)
-      const updateCamera: IdentifiableFunction = () => {
+      const updateCamera: IdentifiableFunction = (delta: number) => {
+        // Don't update camera if chatting
+        if (isChattingRef?.current) return;
+        
         // Early returns with null checks combined for efficiency
         if (!targetRef.current || !controlObjectRef.current || cameraLockedRef.current) {
           return;
@@ -309,7 +332,50 @@ export default function CameraController({
         });
       }
     };
-  }, [camera, targetRef, domElement, registerUpdate, lockCamera, sensitivity, distance, height, isMobile]);
+  }, [camera, targetRef, domElement, registerUpdate, lockCamera, sensitivity, distance, height, isMobile, isChattingRef]);
+
+  useEffect(() => {
+    // Skip pointer lock on mobile
+    if (isMobile) return;
+
+    // Set up pointer lock controls for desktop mode
+    let isLocked = false;
+
+    const lockCamera = () => {
+      // Don't lock if chatting
+      if (isChattingRef?.current) return;
+      
+      domElement.requestPointerLock();
+    };
+
+    const onMouseDown = () => {
+      // Only request pointer lock on right-click or if not already locked
+      if (!isLocked && document.pointerLockElement !== domElement) {
+        lockCamera();
+      }
+    };
+
+    // Add click handler to lock camera
+    domElement.addEventListener('mousedown', onMouseDown);
+
+    // Handle pointer lock change
+    const onPointerLockChange = () => {
+      isLocked = document.pointerLockElement === domElement;
+    };
+    document.addEventListener('pointerlockchange', onPointerLockChange);
+
+    // Handle pointer lock error
+    const onPointerLockError = () => {
+      console.error('Pointer lock error');
+    };
+    document.addEventListener('pointerlockerror', onPointerLockError);
+
+    return () => {
+      domElement.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('pointerlockchange', onPointerLockChange);
+      document.removeEventListener('pointerlockerror', onPointerLockError);
+    };
+  }, [domElement, isMobile, isChattingRef]);
 
   return null;
 } 

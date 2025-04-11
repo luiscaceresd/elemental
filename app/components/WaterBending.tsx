@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Hammer from 'hammerjs';
-import WaterMeter from './WaterMeter';
 import { CharacterControllerRef } from './CharacterController';
 
 // Extend the type definitions for CANNON.World to include missing methods
@@ -29,6 +28,7 @@ interface WaterBendingProps {
   world: CANNON.World;
   updateWaterStatus?: (hasEnoughWater: boolean) => void;
   characterControllerRef?: React.RefObject<CharacterControllerRef | null>;
+  onWaterUpdate: (current: number, max: number, required: number) => void;
 }
 
 // Define a WaterDrop type for our pool
@@ -56,6 +56,7 @@ interface WaterSpear {
 // Debug flag to show water source detection
 const DEBUG_WATER_SOURCES = false;
 
+// Use forwardRef to allow parent components to get a ref to this component
 export default function WaterBending({
   scene,
   domElement,
@@ -66,7 +67,8 @@ export default function WaterBending({
   characterPositionRef,
   world,
   updateWaterStatus,
-  characterControllerRef
+  characterControllerRef,
+  onWaterUpdate
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
   const _mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2()); // Renamed with underscore to indicate intentionally unused
@@ -75,10 +77,9 @@ export default function WaterBending({
   const collectedDropsRef = useRef<number>(0);
   const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]);
   const waterDropPoolRef = useRef<WaterDrop[]>([]);
-  const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 450;
   const REQUIRED_DROPS_TO_FIRE = 45;
-  const MAX_VISIBLE_SPHERES = 10;
+  const MAX_VISIBLE_SPHERES = 20;
   const WATER_DROP_POOL_SIZE = 300;
 
   // Shared resource refs for projectile resources
@@ -95,22 +96,26 @@ export default function WaterBending({
   const SPEAR_POOL_SIZE = 50;
   const activeSpearUpdatesRef = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    const updateDisplayCount = () => {
-      setDisplayedDrops(collectedDropsRef.current);
-      requestAnimationFrame(updateDisplayCount);
-    };
-    const animationId = requestAnimationFrame(updateDisplayCount);
-    return () => cancelAnimationFrame(animationId);
-  }, []);
+  // Helper function to call the callback whenever water changes
+  const triggerWaterUpdate = useCallback(() => {
+    onWaterUpdate(collectedDropsRef.current, MAX_WATER_DROPS, REQUIRED_DROPS_TO_FIRE);
+  }, [onWaterUpdate, MAX_WATER_DROPS, REQUIRED_DROPS_TO_FIRE]);
 
+  // Call triggerWaterUpdate after initializing refs if needed, or rely on initial updates
   useEffect(() => {
-    // Update the character animation system when water status changes
+    // Trigger initial update once refs are stable
+    triggerWaterUpdate();
+  }, [triggerWaterUpdate]);
+
+  // Ensure water status effect also triggers update
+  useEffect(() => {
     if (updateWaterStatus) {
       const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
       updateWaterStatus(hasEnoughWater);
     }
-  }, [displayedDrops, updateWaterStatus, REQUIRED_DROPS_TO_FIRE]);
+    // Also trigger the general water update here
+    triggerWaterUpdate();
+  }, [collectedDropsRef.current, updateWaterStatus, REQUIRED_DROPS_TO_FIRE, triggerWaterUpdate]); // Depend on collectedDropsRef.current isn't ideal, but needed for update trigger
 
   const returnSpearToPool = useCallback((spear: WaterSpear) => {
     if (!spear || !spearPoolRef.current.includes(spear)) {
@@ -382,15 +387,8 @@ export default function WaterBending({
         if (!characterPositionRef?.current) return;
         if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) return;
         
-        // Update water status first
-        if (updateWaterStatus) {
-          updateWaterStatus(false);
-          setTimeout(() => {
-            updateWaterStatus(collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE);
-          }, 100);
-        }
-        
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
+        triggerWaterUpdate(); // Call update after spending water
 
         // Helper: explosion effect – always trigger explosion on collision/lifetime
         const createExplosionEffect = (position: THREE.Vector3) => {
@@ -746,6 +744,7 @@ export default function WaterBending({
       });
 
       const updateBendingEffects: IdentifiableFunction = (delta: number) => {
+        let waterChanged = false;
         if (isBendingRef.current && crosshairPositionRef.current) {
           if (bendingEffectRef.current) {
             bendingEffectRef.current.position.copy(crosshairPositionRef.current);
@@ -833,6 +832,7 @@ export default function WaterBending({
                     positions[i3 + 1] = -1000;
                     if (collectedDropsRef.current < MAX_WATER_DROPS) {
                       collectedDropsRef.current += 1;
+                      waterChanged = true; // Mark water as changed
                       if (bendingEffectRef.current) {
                         const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
                         material.opacity = 0.8;
@@ -895,6 +895,7 @@ export default function WaterBending({
               if (distance < 1.2) { 
                 if (collectedDropsRef.current < MAX_WATER_DROPS) {
                   collectedDropsRef.current += 1;
+                  waterChanged = true; // Mark water as changed
                   if (bendingEffectRef.current) {
                     const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
                     material.opacity = 0.8;
@@ -932,7 +933,10 @@ export default function WaterBending({
           const currentDrops = collectedDropsRef.current;
           const currentSpheres = waterBeltSpheresRef.current.length;
           const waterRatio = Math.min(1, currentDrops / MAX_WATER_DROPS);
-          const visibleSpheres = Math.min(currentDrops, MAX_VISIBLE_SPHERES);
+          // Scale visible spheres based on water ratio, minimum 5 if any water
+          const visibleSpheres = currentDrops > 0 
+            ? Math.max(5, Math.min(Math.ceil(waterRatio * MAX_VISIBLE_SPHERES), MAX_VISIBLE_SPHERES)) 
+            : 0;
 
           if (currentDrops > 0) {
             if (currentSpheres < visibleSpheres) {
@@ -952,23 +956,52 @@ export default function WaterBending({
               }
             }
 
-            const baseRadius = 1.5 + waterRatio * 0.5;
+            const baseRadius = 1.2 + waterRatio * 0.6; // Adjusted radius formula
             const time = Date.now() * 0.001;
 
             waterBeltSpheresRef.current.forEach((sphere, i) => {
               const totalSpheres = waterBeltSpheresRef.current.length;
-              const angle = (i / totalSpheres) * Math.PI * 2;
+              
+              // Determine if we should use double ring for more water
+              const useDoubleRing = totalSpheres > 10;
+              const ringIndex = useDoubleRing && i >= 10 ? 1 : 0;
+              const spheresInRing = useDoubleRing && ringIndex === 1 ? totalSpheres - 10 : Math.min(totalSpheres, 10);
+              const sphereIndexInRing = useDoubleRing && ringIndex === 1 ? i - 10 : i;
+              
+              // Calculate angle based on position in the ring
+              const angle = (sphereIndexInRing / spheresInRing) * Math.PI * 2;
+              
+              // Calculate ring radius (inner ring is smaller)
+              const ringRadius = baseRadius - (ringIndex * 0.3);
+              
               if (characterPositionRef.current) {
                 const characterPos = characterPositionRef.current.clone();
                 sphere.position.copy(characterPos);
-                sphere.position.x += Math.cos(angle + time * 0.5) * baseRadius;
-                sphere.position.y += 1.2 + Math.sin(time + angle * 5) * 0.2;
-                sphere.position.z += Math.sin(angle + time * 0.5) * baseRadius;
+                sphere.position.x += Math.cos(angle + time * 0.5) * ringRadius;
+                // Position at the actual belt level (2 units up)
+                sphere.position.y += 2 + Math.sin(time + angle * 5) * 0.15;
+                sphere.position.z += Math.sin(angle + time * 0.5) * ringRadius;
               }
+
+              // Adjust size based on water ratio and ring
+              const sizeScale = 0.8 + (waterRatio * 0.4) - (ringIndex * 0.1);
+              sphere.scale.set(sizeScale, sizeScale, sizeScale);
 
               const material = sphere.material as THREE.MeshPhysicalMaterial;
               const pulse = Math.sin(time * 1.5 + i * 0.3) * 0.2 + 0.8;
-              material.emissiveIntensity = 0.4 + pulse * (0.2 + waterRatio * 0.3);
+              
+              // More water = brighter glow
+              const intensityBoost = Math.min(1, currentDrops / REQUIRED_DROPS_TO_FIRE) * 0.5;
+              material.emissiveIntensity = 0.3 + pulse * (0.2 + waterRatio * 0.5) + intensityBoost;
+              
+              // Color shifts more toward cyan as water increases
+              if (currentDrops >= REQUIRED_DROPS_TO_FIRE) {
+                material.color.setStyle('#00FFFF'); // Cyan for ready to fire
+                material.emissive.setStyle('#00FFFF');
+              } else {
+                material.color.setStyle('#00BFFF'); // Default blue
+                material.emissive.setStyle('#00BFFF');
+              }
             });
           } else {
             while (waterBeltSpheresRef.current.length > 0) {
@@ -985,6 +1018,11 @@ export default function WaterBending({
         if (updateWaterStatus) {
           const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
           updateWaterStatus(hasEnoughWater);
+        }
+
+        // If water changed during this frame, call the update callback
+        if (waterChanged) {
+          triggerWaterUpdate();
         }
       };
       updateBendingEffects._id = 'bendingVisualEffects';
@@ -1047,13 +1085,11 @@ export default function WaterBending({
         cleanupFn();
       }
     };
-  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus, characterControllerRef]);
+  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus, characterControllerRef, onWaterUpdate]);
 
-  return (
-    <WaterMeter
-      currentWater={displayedDrops}
-      maxWater={MAX_WATER_DROPS}
-      requiredWater={REQUIRED_DROPS_TO_FIRE}
-    />
-  );
+  // No longer renders WaterMeter directly
+  return null;
 }
+
+// Assign a display name for debugging purposes (optional but recommended)
+WaterBending.displayName = 'WaterBending';

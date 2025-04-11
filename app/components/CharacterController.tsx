@@ -60,7 +60,8 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
   // Reference to track water amount for animations
   const hasEnoughWaterRef = useRef<boolean>(false);
   // Add health tracking
-  const [health, setHealth] = useState<number>(250); // Base health of 250 HP
+  const MAX_CHARACTER_HEALTH = 275; // Define max health constant
+  const [health, setHealth] = useState<number>(MAX_CHARACTER_HEALTH); // Initialize with max health
   const [isInvulnerable, setIsInvulnerable] = useState<boolean>(false);
   const lastDamageTimeRef = useRef<number>(0);
   const invulnerabilityDuration = 500; // 500ms invulnerability after taking damage
@@ -90,7 +91,7 @@ const CharacterController = forwardRef<CharacterControllerRef, Omit<CharacterCon
       // Apply damage
       setHealth(prevHealth => {
         const newHealth = Math.max(0, prevHealth - amount);
-        console.log(`Character took ${amount} damage. Health: ${newHealth}/${250}`);
+        console.log(`Character took ${amount} damage. Health: ${newHealth}/${MAX_CHARACTER_HEALTH}`); // Use constant for max health
         
         // Handle death if health reaches 0
         if (newHealth <= 0) {

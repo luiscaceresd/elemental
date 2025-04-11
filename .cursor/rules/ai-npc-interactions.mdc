@@ -1,0 +1,169 @@
+---
+description: Guidelines for implementing AI-powered NPC interactions in the game
+globs: ["**/components/**/*.tsx", "**/api/**/*.ts"]
+alwaysApply: false
+---
+
+# AI NPC Interaction Guidelines
+
+## Overview
+This rule defines standards for implementing AI-powered NPC interactions in the Elemental game. It covers integration with Vercel AI SDK, chat interface implementation, and player movement handling during interactions.
+
+## Guidelines
+
+### Route Handler Implementation
+
+1. AI routes should be placed in `app/api` directory with consistent naming:
+   ```
+   app/api/{feature-name}/route.ts
+   ```
+
+2. NPC chat endpoints must use the Vercel AI SDK `streamText` function:
+   ```typescript
+   import { openai } from '@ai-sdk/openai';
+   import { streamText } from 'ai';
+   
+   export async function POST(req: Request) {
+     const { messages } = await req.json();
+     
+     const result = streamText({
+       model: openai('gpt-4o'),
+       messages,
+       system: `Your system prompt here...`,
+     });
+     
+     return result.toDataStreamResponse();
+   }
+   ```
+
+3. System prompts should establish character traits and follow these rules:
+   - Keep responses concise (under 100 words)
+   - Maintain character consistency
+   - Reference the game world appropriately
+   - Never break the fourth wall
+
+### Chat Component Implementation
+
+1. Use `useChat` hook from the AI SDK to manage conversations:
+   ```typescript
+   const { messages, input, handleInputChange, handleSubmit, isLoading } = useChat({
+     api: '/api/npc-chat',
+     initialMessages: initialMessages
+   });
+   ```
+
+2. Add the `npc-chat-input` class to chat input elements for automated focus:
+   ```tsx
+   <Input
+     ref={inputRef}
+     className="npc-chat-input ..."
+     // other props
+   />
+   ```
+
+3. Implement both keyboard shortcuts:
+   - Enter key to send messages
+   - Escape key to close chat interface
+
+### Player Movement Handling
+
+1. All NPC components must accept and use `isChattingRef`:
+   ```typescript
+   interface NPCProps {
+     // other props
+     isChattingRef?: React.MutableRefObject<boolean>;
+   }
+   ```
+
+2. Update the chatting state whenever chat opens or closes:
+   ```typescript
+   useEffect(() => {
+     if (isChattingRef) {
+       isChattingRef.current = showChat;
+     }
+   }, [showChat, isChattingRef]);
+   ```
+
+3. The game loop must check the chatting state:
+   ```typescript
+   if (gameState === 'playing' && !isChattingRef.current) {
+     // Only run physics and update character position if NOT chatting
+   }
+   ```
+
+4. Keyboard input handlers must check chatting state:
+   ```typescript
+   const onKeyDown = (event: KeyboardEvent) => {
+     if (isChattingRef.current) return; // Ignore movement keys when chatting
+     // Normal input handling
+   };
+   ```
+
+### UI/UX Guidelines
+
+1. All NPC chat interfaces must:
+   - Include a close button
+   - Show a "Chatting with [NPC]" status indicator
+   - Auto-focus the input field
+   - Have a semi-transparent background
+   - Be positioned to not obstruct important game elements
+
+2. Interaction prompts should:
+   - Be visible only when player is in interaction range (≤ 5 units)
+   - Indicate the appropriate interaction method (G key or tap)
+   - Not appear when already chatting or when game is paused
+
+3. The exclamation mark indicator should:
+   - Float above the NPC
+   - Be clearly visible and animate subtly
+   - Face the camera while maintaining vertical orientation
+
+## Examples
+
+### Good: Proper Chat State Management
+
+```typescript
+// In NPC component
+useEffect(() => {
+  if (isChattingRef) {
+    isChattingRef.current = showChat;
+  }
+}, [showChat, isChattingRef]);
+
+// In GameCanvas component
+const animate = () => {
+  // Only update physics if playing AND NOT chatting
+  if (gameState === 'playing' && !isChattingRef.current) {
+    const delta = clock.getDelta();
+    updateFunctionsRef.current.forEach(update => update(delta));
+  }
+  // Always render the scene
+  renderer.render(scene, camera);
+};
+```
+
+### Bad: Not Checking Chat State
+
+```typescript
+// BAD - Always processes movement keys
+const onKeyDown = (event: KeyboardEvent) => {
+  const key = event.key.toLowerCase();
+  if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+    keysRef.current[key] = true;
+  }
+};
+
+// BAD - Doesn't stop updates during chat
+const animate = () => {
+  if (gameState === 'playing') { // Missing check for chatting state
+    const delta = clock.getDelta();
+    updateFunctionsRef.current.forEach(update => update(delta));
+  }
+};
+```
+
+## References
+
+- [Vercel AI SDK Documentation](https://sdk.vercel.ai/docs/getting-started/nextjs-app-router)
+- [OpenAI API Reference](https://platform.openai.com/docs/api-reference)
+- React Single Responsibility Principle (components under 500 lines) 

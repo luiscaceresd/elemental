@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: Apply best practices for minimizing useEffect in React components
 glob: "**/*.{jsx,tsx}"
 ---
