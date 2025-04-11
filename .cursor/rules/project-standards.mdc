@@ -1,6 +1,7 @@
 ---
 description: General coding standards for the elemental game project
-glob: "**/*.{ts,tsx,js,jsx}"
+globs: ["**/*.{ts,tsx,js,jsx}"]
+alwaysApply: true
 ---
 
 # Elemental Game Project Standards
@@ -33,7 +34,9 @@ When working on any code in this project, follow these general standards:
    - CSS/SCSS imports at the end
 
 2. **Package Management**:
-   - Always use pnpm for package management
+   - **ALWAYS use pnpm for package management - NEVER use npm or yarn**
+   - Run `pnpm install` to add dependencies, not `npm install` or `yarn add`
+   - Use `pnpm run` for scripts, not `npm run` or `yarn run`
    - Include proper types for all dependencies
    - Create custom type definitions when official types aren't available
 

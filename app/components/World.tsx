@@ -17,9 +17,10 @@ interface WorldProps {
   world: CANNON.World;
   characterPositionRef: React.MutableRefObject<THREE.Vector3>;
   gameState: 'playing' | 'paused';
+  isChattingRef?: React.MutableRefObject<boolean>;
 }
 
-export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate, world, characterPositionRef, gameState }: WorldProps) {
+export default function World({ scene, isBendingRef, crosshairPositionRef, registerUpdate, world, characterPositionRef, gameState, isChattingRef }: WorldProps) {
   const [treePositions, setTreePositions] = useState<THREE.Vector3[]>([]);
   const [pondPositions, setPondPositions] = useState<{ position: THREE.Vector3, size: number, depth: number }[]>([]);
   const [npcPosition] = useState<THREE.Vector3>(new THREE.Vector3(5, 1, 8)); // Near player start position (0, 1, 5)
@@ -250,6 +251,7 @@ export default function World({ scene, isBendingRef, crosshairPositionRef, regis
         characterPositionRef={characterPositionRef}
         registerUpdate={registerUpdate}
         gameState={gameState}
+        isChattingRef={isChattingRef}
       />
     </>
   );

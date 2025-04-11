@@ -78,7 +78,7 @@ export default function WaterBending({
   const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 450;
   const REQUIRED_DROPS_TO_FIRE = 45;
-  const MAX_VISIBLE_SPHERES = 10;
+  const MAX_VISIBLE_SPHERES = 20;
   const WATER_DROP_POOL_SIZE = 300;
 
   // Shared resource refs for projectile resources
@@ -932,7 +932,10 @@ export default function WaterBending({
           const currentDrops = collectedDropsRef.current;
           const currentSpheres = waterBeltSpheresRef.current.length;
           const waterRatio = Math.min(1, currentDrops / MAX_WATER_DROPS);
-          const visibleSpheres = Math.min(currentDrops, MAX_VISIBLE_SPHERES);
+          // Scale visible spheres based on water ratio, minimum 5 if any water
+          const visibleSpheres = currentDrops > 0 
+            ? Math.max(5, Math.min(Math.ceil(waterRatio * MAX_VISIBLE_SPHERES), MAX_VISIBLE_SPHERES)) 
+            : 0;
 
           if (currentDrops > 0) {
             if (currentSpheres < visibleSpheres) {
@@ -952,23 +955,52 @@ export default function WaterBending({
               }
             }
 
-            const baseRadius = 1.5 + waterRatio * 0.5;
+            const baseRadius = 1.2 + waterRatio * 0.6; // Adjusted radius formula
             const time = Date.now() * 0.001;
 
             waterBeltSpheresRef.current.forEach((sphere, i) => {
               const totalSpheres = waterBeltSpheresRef.current.length;
-              const angle = (i / totalSpheres) * Math.PI * 2;
+              
+              // Determine if we should use double ring for more water
+              const useDoubleRing = totalSpheres > 10;
+              const ringIndex = useDoubleRing && i >= 10 ? 1 : 0;
+              const spheresInRing = useDoubleRing && ringIndex === 1 ? totalSpheres - 10 : Math.min(totalSpheres, 10);
+              const sphereIndexInRing = useDoubleRing && ringIndex === 1 ? i - 10 : i;
+              
+              // Calculate angle based on position in the ring
+              const angle = (sphereIndexInRing / spheresInRing) * Math.PI * 2;
+              
+              // Calculate ring radius (inner ring is smaller)
+              const ringRadius = baseRadius - (ringIndex * 0.3);
+              
               if (characterPositionRef.current) {
                 const characterPos = characterPositionRef.current.clone();
                 sphere.position.copy(characterPos);
-                sphere.position.x += Math.cos(angle + time * 0.5) * baseRadius;
-                sphere.position.y += 1.2 + Math.sin(time + angle * 5) * 0.2;
-                sphere.position.z += Math.sin(angle + time * 0.5) * baseRadius;
+                sphere.position.x += Math.cos(angle + time * 0.5) * ringRadius;
+                // Position at the actual belt level (2 units up)
+                sphere.position.y += 2 + Math.sin(time + angle * 5) * 0.15;
+                sphere.position.z += Math.sin(angle + time * 0.5) * ringRadius;
               }
+
+              // Adjust size based on water ratio and ring
+              const sizeScale = 0.8 + (waterRatio * 0.4) - (ringIndex * 0.1);
+              sphere.scale.set(sizeScale, sizeScale, sizeScale);
 
               const material = sphere.material as THREE.MeshPhysicalMaterial;
               const pulse = Math.sin(time * 1.5 + i * 0.3) * 0.2 + 0.8;
-              material.emissiveIntensity = 0.4 + pulse * (0.2 + waterRatio * 0.3);
+              
+              // More water = brighter glow
+              const intensityBoost = Math.min(1, currentDrops / REQUIRED_DROPS_TO_FIRE) * 0.5;
+              material.emissiveIntensity = 0.3 + pulse * (0.2 + waterRatio * 0.5) + intensityBoost;
+              
+              // Color shifts more toward cyan as water increases
+              if (currentDrops >= REQUIRED_DROPS_TO_FIRE) {
+                material.color.setStyle('#00FFFF'); // Cyan for ready to fire
+                material.emissive.setStyle('#00FFFF');
+              } else {
+                material.color.setStyle('#00BFFF'); // Default blue
+                material.emissive.setStyle('#00BFFF');
+              }
             });
           } else {
             while (waterBeltSpheresRef.current.length > 0) {

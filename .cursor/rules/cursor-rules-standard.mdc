@@ -1,0 +1,128 @@
+---
+description: Guidelines for creating and maintaining cursor rules in the project
+globs: ["*.mdc", "**/*.mdc"]
+alwaysApply: true
+---
+# Cursor Rules Standards
+
+## Overview
+This document outlines the standards for creating and maintaining cursor rules within the project. These standards ensure consistency and maximize the effectiveness of rules for AI assistance.
+
+## Rule Location
+
+All cursor rules **MUST** be stored in the `.cursor/rules` directory with the `.mdc` extension:
+
+```
+.cursor/
+  └── rules/
+      ├── example-rule.mdc
+      ├── component-guidelines.mdc
+      └── api-standards.mdc
+```
+
+## Rule Required Fields
+
+Every cursor rule file **MUST** include the following in its frontmatter:
+
+```yaml
+---
+description: A concise, clear description of the rule's purpose
+globs: ["**/*.ts", "**/*.tsx"] # Patterns for files the rule applies to
+alwaysApply: false # Whether the rule should always be applied
+---
+```
+
+### Required Fields Explanation
+
+1. **description**: A clear, concise explanation of the rule's purpose. This helps both humans and AI understand when to apply the rule.
+   - Must be under 100 characters
+   - Should clearly communicate the rule's intent
+
+2. **globs**: File patterns that the rule applies to. Can be specific or general.
+   - Use standard glob patterns
+   - Be as specific as possible to avoid unnecessary rule application
+
+3. **alwaysApply**: Boolean indicating if the rule should be applied automatically.
+   - `true`: Rule is applied to all matching files automatically
+   - `false`: Rule is only applied when explicitly referenced
+
+## Rule Content Structure
+
+Rules should follow a consistent structure:
+
+1. **Title**: Clear, descriptive title at the top
+2. **Overview**: Brief summary of the rule's purpose
+3. **Guidelines**: Specific instructions, organized into sections
+4. **Examples**: Practical examples showing correct and incorrect approaches
+5. **References**: Any relevant references to external documentation or internal resources
+
+## Example Rule
+
+```markdown
+---
+description: Code formatting standards for JavaScript and TypeScript files
+globs: ["**/*.js", "**/*.ts", "**/*.jsx", "**/*.tsx"]
+alwaysApply: true
+---
+# JavaScript and TypeScript Formatting Standards
+
+## Overview
+This rule defines formatting standards for JavaScript and TypeScript files to ensure consistency across the codebase.
+
+## Guidelines
+1. Use 2-space indentation
+2. Use semicolons at the end of statements
+3. Prefer single quotes for strings
+...
+
+## Examples
+Good:
+```js
+const greeting = 'Hello';
+console.log(greeting);
+```
+
+Bad:
+```js
+const greeting = "Hello"
+console.log(greeting)
+```
+```
+
+## Best Practices
+
+1. **Be Specific**: Rules should address specific concerns rather than trying to cover too much ground
+2. **Provide Context**: Explain why a rule exists, not just what it requires
+3. **Include Examples**: Show both correct and incorrect implementations
+4. **Keep Updated**: Review and update rules as project standards evolve
+5. **Avoid Redundancy**: Don't duplicate information available in other rules
+6. **Use Clear Language**: Write rules in clear, direct language
+
+## Rule Maintenance
+
+Rules should be reviewed regularly to ensure they remain relevant and accurate. When updating rules:
+
+1. Document significant changes in commit messages
+2. Update the description if the rule's purpose changes
+3. Update globs as file structure changes
+4. Consider the impact on existing code and AI guidance
+
+## Updating Cursor Rules
+
+**IMPORTANT**: When updating cursor rules, you must follow this specific process:
+
+1. **Delete the existing rule file** - Editing a rule file in place may not propagate changes correctly
+2. **Create a new file with the same name** - After deletion, create a new file with the same name and updated content
+3. **Verify the rule is applied** - Check that the new rule is being correctly applied by referencing it explicitly
+
+This delete-then-create approach is necessary because the cursor rules system may cache rules, and editing in place can lead to inconsistent behavior. Examples:
+
+```bash
+# To update a rule:
+rm .cursor/rules/my-rule.mdc
+# Then create a new file with the updated content
+touch .cursor/rules/my-rule.mdc
+# Edit the new file with your changes
+```
+
+If you're unsure if your rule update took effect, you can check by explicitly referencing the rule in a query. 

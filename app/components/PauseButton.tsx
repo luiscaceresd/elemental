@@ -5,9 +5,10 @@ import { useEffect, useRef } from 'react';
 interface PauseButtonProps {
   onPause: () => void;
   isMobile: boolean;
+  isChattingRef?: React.MutableRefObject<boolean>;
 }
 
-export default function PauseButton({ onPause, isMobile }: PauseButtonProps) {
+export default function PauseButton({ onPause, isMobile, isChattingRef }: PauseButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   // Add a direct touch event handler for mobile devices
@@ -31,10 +32,13 @@ export default function PauseButton({ onPause, isMobile }: PauseButtonProps) {
   }, [isMobile, onPause]);
 
   return (
-    <div className="fixed top-4 right-4 z-[1001] flex flex-col items-end pointer-events-auto">
+    <div className="hide-when-paused absolute top-6 right-6 flex flex-col items-center z-50">
       <button
         ref={buttonRef}
         onClick={(e) => {
+          // Don't pause if chatting
+          if (isChattingRef?.current) return;
+          
           e.preventDefault();
           e.stopPropagation();
           onPause();

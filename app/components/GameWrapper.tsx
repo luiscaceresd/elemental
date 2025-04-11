@@ -19,6 +19,7 @@ export default function GameWrapper() {
   const [isMobile, setIsMobile] = useState(false);
   const pointerLockRequestedRef = useRef(false);
   const pointerLockTimerRef = useRef<number | null>(null);
+  const isChattingRef = useRef<boolean>(false);
 
   // Preload the GameCanvas component as soon as GameWrapper mounts
   useEffect(() => {
@@ -68,6 +69,9 @@ export default function GameWrapper() {
 
       // If playing and pointer is unlocked, show pause menu
       if (gameState === 'playing' && document.pointerLockElement === null && !isMobile) {
+        // Don't pause if chatting with an NPC
+        if (isChattingRef.current) return;
+        
         // Brief delay to avoid immediate state changes
         setTimeout(() => {
           setGameState('paused');
@@ -80,7 +84,7 @@ export default function GameWrapper() {
       pointerLockRequestedRef.current = false;
 
       // If we tried to enter playing state but pointer lock failed, force pause
-      if (gameState === 'playing' && !isMobile) {
+      if (gameState === 'playing' && !isMobile && !isChattingRef.current) {
         setTimeout(() => {
           setGameState('paused');
         }, 100);
@@ -114,6 +118,9 @@ export default function GameWrapper() {
 
   // Handler for pausing the game
   const handlePauseGame = useCallback(() => {
+    // Don't pause if chatting with an NPC
+    if (isChattingRef.current) return;
+    
     setGameState('paused');
 
     // Only try to release pointer lock if currently locked
@@ -160,6 +167,9 @@ export default function GameWrapper() {
         if (e.key === 'Enter' || e.key === 'Escape') {
           e.preventDefault(); // Prevent default browser actions for these keys
 
+          // Don't pause if chatting
+          if (gameState === 'playing' && isChattingRef.current) return;
+          
           if (gameState === 'playing') {
             handlePauseGame();
           } else if (gameState === 'paused') {
@@ -201,15 +211,23 @@ export default function GameWrapper() {
       {(gameState === 'playing' || gameState === 'paused') && (
         <>
           <div className={gameState === 'paused' ? 'game-paused' : ''}>
-            <GameCanvas gameState={gameState} />
+            <GameCanvas 
+              gameState={gameState} 
+              chatStateRef={isChattingRef} 
+            />
             {gameState === 'playing' && (
               <PauseButton
                 onPause={handlePauseGame}
                 isMobile={isMobile}
+                isChattingRef={isChattingRef}
               />
             )}
             {gameState === 'paused' && (
-              <PauseMenu onResume={handleResumeGame} onExit={handleExitGame} />
+              <PauseMenu 
+                onResume={handleResumeGame} 
+                onExit={handleExitGame} 
+                isChattingRef={isChattingRef}
+              />
             )}
           </div>
           <a target="_blank" href="https://jam.pieter.com" style={{ fontFamily: "'system-ui', sans-serif", position: 'fixed', bottom: -1, right: -1, padding: '7px', fontSize: '14px', fontWeight: 'bold', background: '#fff', color: '#000', textDecoration: 'none', zIndex: 10000, borderTopLeftRadius: '12px', border: '1px solid #fff' }}>🕹️ Vibe Jam 2025</a>

@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: Test Driven Development (TDD) standards for the elemental game project
 glob: "**/*.{ts,tsx,js,jsx}"
 ---

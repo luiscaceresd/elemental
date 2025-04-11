@@ -71,7 +71,7 @@ const WaterMeter: React.FC<WaterMeterProps> = ({
 
   const desktopStyle: CSSProperties = {
     position: 'absolute',
-    bottom: '20px',
+    bottom: '60px', // Changed from '20px' to move it up and avoid the Vibe Jam badge
     right: '20px',
     display: 'flex',
     alignItems: 'center',

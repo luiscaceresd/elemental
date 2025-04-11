@@ -1,6 +1,7 @@
 ---
 description: Game physics standards using CannonJS for the elemental game project
-glob: "**/*.{ts,tsx,js,jsx}"
+globs: ["**/*.{ts,tsx,js,jsx}"]
+alwaysApply: false
 ---
 
 # Game Physics Rules

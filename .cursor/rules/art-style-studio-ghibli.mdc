@@ -1,6 +1,7 @@
 ---
 description: Guidelines for implementing Studio Ghibli inspired art style in the Elemental game
-glob: "**/*.{tsx,ts,js,jsx}"
+globs: ["**/*.{tsx,ts,js,jsx}"]
+alwaysApply: false
 ---
 
 # Studio Ghibli Art Style for Your Game

@@ -1,4 +1,9 @@
 ---
+description: 
+globs: 
+alwaysApply: false
+---
+---
 description: Apply best practices for Three.js game development with React
 glob: "**/components/*.{jsx,tsx}"
 ---

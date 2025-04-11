@@ -1,0 +1,175 @@
+---
+description: Guidelines for managing game states and player interactions in the Elemental game
+globs: ["**/components/**/*.{tsx,ts}"]
+alwaysApply: false
+---
+
+# Game State Management Guidelines
+
+## Overview
+This rule defines standards for managing different game states and their interactions in the Elemental game. It covers main game states, chatting states, UI visibility, and proper input handling based on the current state.
+
+## Core Game States
+
+1. **Main Game States**:
+   - `start`: Initial game screen before gameplay begins
+   - `playing`: Active gameplay state where character can move and interact
+   - `paused`: Game is temporarily halted, showing pause menu
+   
+2. **Secondary States**:
+   - `chatting`: Player is interacting with an NPC (tracked via `isChattingRef`)
+   - `bending`: Player is performing waterbending (tracked via `isBendingRef`)
+   - `attacking`: Player is performing an attack action
+
+## State Management Implementation
+
+1. **Game State References**:
+   ```typescript
+   // Main game state in GameWrapper
+   const [gameState, setGameState] = useState<'start' | 'playing' | 'paused'>('start');
+   
+   // Secondary states should use refs for cross-component access
+   const isChattingRef = useRef<boolean>(false);
+   const isBendingRef = useRef<boolean>(false);
+   ```
+
+2. **State Propagation**:
+   - Pass state references to child components that need them
+   - Use props to communicate state between components
+   ```typescript
+   <NPC 
+     // Other props...
+     gameState={gameState}
+     isChattingRef={isChattingRef}
+   />
+   ```
+
+3. **State Updates**:
+   - All state updates should happen in effect hooks or event handlers
+   - Secondary states should always sync back to parent components
+   ```typescript
+   // In NPC component
+   useEffect(() => {
+     if (isChattingRef) {
+       isChattingRef.current = showChat;
+     }
+   }, [showChat, isChattingRef]);
+   ```
+
+## UI Behavior Based on State
+
+1. **Z-Index Hierarchy**:
+   - Chat interfaces: 20000+
+   - Game UI elements: 10000+
+   - Game controls: 1000+
+   - Game world elements: <1000
+   
+2. **Element Visibility**:
+   - When `chatting`: Show chat interface, hide crosshair, show cursor
+   - When `paused`: Show pause menu, hide gameplay controls
+   - When `playing` (not chatting): Show crosshair, hide cursor
+
+3. **Mobile-Specific UI**:
+   - Use touch-friendly buttons for interactions
+   - Position UI elements away from screen edges
+   - Adjust size and spacing for touch targets
+   ```typescript
+   {isMobile ? (
+     <button className="npc-interact-button">Interact with NPC</button>
+   ) : (
+     <span>Press <strong>G</strong> to interact</span>
+   )}
+   ```
+
+## Input Handling
+
+1. **Keyboard Input**:
+   - Block movement keys (WASD) when `chatting` or `paused`
+   - 'G' key opens NPC chat when near an NPC
+   - Escape closes chat or pauses game
+   - Enter sends chat messages when chatting
+   
+   ```typescript
+   const onKeyDown = (event: KeyboardEvent) => {
+     // Don't process movement keys if chatting
+     if (isChattingRef.current) {
+       return;
+     }
+     
+     // Normal input handling
+   };
+   ```
+
+2. **Mouse Input**:
+   - Prevent camera movement when `chatting`
+   - Release pointer lock when `chatting` begins
+   - Block right-click context menu in game
+   
+   ```typescript
+   // Check chatting state before applying camera movement
+   if (isChattingRef?.current && controls.isLocked) {
+     controls.unlock();
+   }
+   ```
+
+3. **Touch Input**:
+   - Disable joystick controls when `chatting`
+   - Use explicit interact buttons rather than raycasting for mobile
+   - Ensure touch elements have high enough z-index
+
+## NPC Interaction
+
+1. **Proximity Detection**:
+   - Set interaction radius (5 units is standard)
+   - Show indicator only when close enough to interact
+   
+   ```typescript
+   const distanceToPlayer = characterPositionRef.current.distanceTo(npcRef.current.position);
+   const playerIsNearby = distanceToPlayer < 5; // 5 units interaction radius
+   ```
+
+2. **Interaction Indicators**:
+   - Show interaction prompt when player is in range
+   - Hide prompt when chatting begins
+   - Make indicators prominent but non-intrusive
+
+3. **Chat Interface**:
+   - Position appropriately (bottom right on desktop, centered on mobile)
+   - Auto-focus input field
+   - Make chat interface semi-transparent
+   - Add clear close button
+
+## Examples
+
+### Good: Proper State Checking
+
+```typescript
+// In GameCanvas animation loop
+const animate = () => {
+  // Only update physics if playing AND NOT chatting
+  if (gameState === 'playing' && !isChattingRef.current) {
+    const delta = clock.getDelta();
+    updateFunctionsRef.current.forEach(update => update(delta));
+  }
+  // Always render the scene
+  renderer.render(scene, camera);
+};
+```
+
+### Bad: Missing State Checks
+
+```typescript
+// BAD - Doesn't check chatting state
+const onKeyDown = (event: KeyboardEvent) => {
+  const key = event.key.toLowerCase();
+  if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+    keysRef.current[key] = true;
+  }
+};
+```
+
+## References
+
+- `app/components/GameWrapper.tsx`: Main game state management
+- `app/components/GameCanvas.tsx`: Game rendering and input handling
+- `app/components/NPC.tsx`: NPC interaction and chat management 

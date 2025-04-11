@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
-import { RealtimeChat } from '@/components/realtime-chat';
+import { AINPCChat } from '@/components/ai-npc-chat';
 
 interface NPCProps {
   scene: THREE.Scene;
@@ -14,6 +14,7 @@ interface NPCProps {
   characterPositionRef?: React.MutableRefObject<THREE.Vector3>;
   registerUpdate?: (fn: (delta: number) => void) => (() => void) | void;
   gameState?: 'playing' | 'paused';
+  isChattingRef?: React.MutableRefObject<boolean>;
 }
 
 const NPC: React.FC<NPCProps> = ({
@@ -24,7 +25,8 @@ const NPC: React.FC<NPCProps> = ({
   size = 1,
   characterPositionRef,
   registerUpdate,
-  gameState = 'playing'
+  gameState = 'playing',
+  isChattingRef
 }) => {
   const npcRef = useRef<THREE.Mesh | null>(null);
   const bodyRef = useRef<CANNON.Body | null>(null);
@@ -170,10 +172,21 @@ const NPC: React.FC<NPCProps> = ({
     if (!characterPositionRef || !registerUpdate) return;
     
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'g' && isPlayerNearby && gameState === 'playing') {
+      if (event.key.toLowerCase() === 'g' && isPlayerNearby && gameState === 'playing' && !showChat) {
         console.log('Interacting with NPC');
-        // Show chat interface instead of alert
+        // Prevent the 'g' key from being entered in the input field
+        event.preventDefault();
+        // Show chat interface
         setShowChat(true);
+        
+        // Focus the input field after a short delay to ensure it's rendered
+        // Use a slightly longer delay to ensure the key event is fully processed
+        setTimeout(() => {
+          const chatInput = document.querySelector('.npc-chat-input') as HTMLInputElement;
+          if (chatInput) {
+            chatInput.focus();
+          }
+        }, 100);
       }
       
       // Add escape key to close chat
@@ -188,29 +201,12 @@ const NPC: React.FC<NPCProps> = ({
     const handleTap = (event: MouseEvent | TouchEvent) => {
       if (!isMobile || !isPlayerNearby || !npcRef.current || gameState !== 'playing') return;
       
-      // Get the tap position
-      const mouse = new THREE.Vector2();
-      if (event instanceof MouseEvent) {
-        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
-      } else {
-        const touch = event.touches[0];
-        mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-        mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
-      }
-      
-      // Check if the NPC was tapped
-      const raycaster = new THREE.Raycaster();
-      const camera = scene.getObjectByName('camera') as THREE.Camera;
-      if (camera) {
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObject(npcRef.current);
-        
-        if (intersects.length > 0) {
-          console.log('Tapped on NPC');
-          // Show chat interface instead of alert
-          setShowChat(true);
-        }
+      // Don't need the raycaster for mobile anymore - use the button instead
+      if (event.target && (event.target as HTMLElement).classList.contains('npc-interact-button')) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('Tapped on NPC interact button');
+        setShowChat(true);
       }
     };
     
@@ -260,6 +256,27 @@ const NPC: React.FC<NPCProps> = ({
     };
   }, [scene, position, size, characterPositionRef, registerUpdate, isPlayerNearby, isMobile, gameState, showChat]);
 
+  // Set chatting status when the chat opens or closes
+  useEffect(() => {
+    if (isChattingRef) {
+      isChattingRef.current = showChat;
+    }
+  }, [showChat, isChattingRef]);
+
+  // Handle escape key to close chat
+  useEffect(() => {
+    const handleEscKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && showChat) {
+        setShowChat(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscKey);
+    return () => {
+      window.removeEventListener('keydown', handleEscKey);
+    };
+  }, [showChat]);
+
   // Initial chat messages for NPC
   const initialMessages = [
     {
@@ -289,13 +306,38 @@ const NPC: React.FC<NPCProps> = ({
             borderRadius: '5px',
             fontFamily: 'Arial, sans-serif',
             fontSize: '16px',
-            zIndex: 100,
+            zIndex: 30000,
             textAlign: 'center',
             boxShadow: '0 0 10px rgba(0, 0, 0, 0.5)',
+            pointerEvents: 'auto',
           }}
         >
           {isMobile ? (
-            <span>Tap on the NPC to interact</span>
+            <span>
+              <button 
+                className="npc-interact-button"
+                onClick={() => setShowChat(true)}
+                style={{
+                  backgroundColor: '#4CAF50',
+                  border: 'none',
+                  color: 'white',
+                  padding: '8px 16px',
+                  textAlign: 'center',
+                  textDecoration: 'none',
+                  display: 'inline-block',
+                  fontSize: '16px',
+                  margin: '4px 2px',
+                  cursor: 'pointer',
+                  borderRadius: '5px',
+                  fontWeight: 'bold',
+                  zIndex: 30001,
+                  position: 'relative',
+                  pointerEvents: 'auto',
+                }}
+              >
+                Interact with NPC
+              </button>
+            </span>
           ) : (
             <span>Press <strong>G</strong> to interact with NPC</span>
           )}
@@ -307,11 +349,12 @@ const NPC: React.FC<NPCProps> = ({
         <div 
           style={{
             position: 'fixed',
-            bottom: '20px',
-            right: '20px',
-            width: '360px',
-            height: '480px',
-            zIndex: 200,
+            bottom: isMobile ? '60px' : '20px',
+            right: isMobile ? '10px' : '20px',
+            width: isMobile ? 'calc(100% - 20px)' : '360px',
+            height: isMobile ? '40%' : '480px',
+            maxHeight: isMobile ? '300px' : '480px',
+            zIndex: 20000,
             borderRadius: '12px',
             overflow: 'hidden',
             boxShadow: '0 10px 25px rgba(0, 0, 0, 0.5)',
@@ -342,11 +385,33 @@ const NPC: React.FC<NPCProps> = ({
             </button>
           </div>
           <div style={{ height: 'calc(100% - 43px)' }}>
-            <RealtimeChat
-              roomName="npc-guide-chat"
+            <AINPCChat
               username={username}
-              messages={initialMessages}
+              initialMessages={[
+                {
+                  id: '1',
+                  content: 'Hello traveler! I am an NPC in this world.',
+                  role: 'assistant'
+                }
+              ]}
+              onClose={() => setShowChat(false)}
             />
+          </div>
+
+          {/* Overlay a semi-transparent "Chatting" status indicator */}
+          <div style={{
+            position: 'absolute',
+            top: -40,
+            right: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            color: 'white',
+            padding: '5px 10px',
+            borderRadius: '5px',
+            fontSize: '14px',
+            pointerEvents: 'none',
+            display: isMobile ? 'none' : 'block', // Hide the floating indicator on mobile
+          }}>
+            Chatting with Guide...
           </div>
         </div>
       )}

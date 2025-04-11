@@ -1,6 +1,7 @@
 ---
 description: Overview of the Elemental game, its mechanics, and technical foundations
-glob: "*"
+globs: ["*"]
+alwaysApply: true
 ---
 
 # Elemental Game Overview

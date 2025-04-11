@@ -18,7 +18,59 @@ type IdentifiableFunction = ((delta: number) => void) & {
   _id?: string
 };
 
-export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paused' }) {
+// Create a type that extends RefObject to include our custom property
+interface ExtendedRefObject<T> extends React.RefObject<T> {
+  updateBothRefs?: (newValue: T) => void;
+}
+
+// Custom hook to sync a local ref with a parent ref
+function useSyncRef<T>(
+  localValue: T,
+  parentRef?: React.MutableRefObject<T>
+): React.MutableRefObject<T> {
+  const localRef = useRef<T>(localValue);
+  
+  // Simple direct assignment when the parent ref changes
+  useEffect(() => {
+    if (!parentRef) return;
+    
+    // Set initial value from local to parent
+    parentRef.current = localRef.current;
+    
+    // Instead of using a proxy, which requires type assertions,
+    // set up a way to track changes to localRef
+    const originalCurrent = localRef.current;
+    
+    // Create a setter that updates both refs
+    const updateBothRefs = (newValue: T) => {
+      localRef.current = newValue;
+      if (parentRef) {
+        parentRef.current = newValue;
+      }
+    };
+    
+    // Store the setter for potential use elsewhere
+    // (though in practice, direct ref updates are more common)
+    (localRef as ExtendedRefObject<T>).updateBothRefs = updateBothRefs;
+    
+    return () => {
+      // Restore original value on cleanup if needed
+      localRef.current = originalCurrent;
+      // Clean up the setter
+      delete (localRef as ExtendedRefObject<T>).updateBothRefs;
+    };
+  }, [parentRef]);
+  
+  return localRef;
+}
+
+export default function GameCanvas({ 
+  gameState, 
+  chatStateRef 
+}: { 
+  gameState: 'playing' | 'paused'; 
+  chatStateRef?: React.MutableRefObject<boolean>;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [sceneReady, setSceneReady] = useState(false);
 
@@ -55,6 +107,47 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
   // New refs for waterbending
   const isBendingRef = useRef<boolean>(false);
   const crosshairPositionRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  
+  // Use local isChattingRef
+  const isChattingRef = useRef<boolean>(false);
+  
+  // Set up chatting state sync with parent
+  useEffect(() => {
+    if (!chatStateRef) return;
+    
+    // Function to update the parent ref when local ref changes
+    const updateParentRef = () => {
+      chatStateRef.current = isChattingRef.current;
+    };
+    
+    // Set initial state
+    updateParentRef();
+    
+    // Set up a MutationObserver to watch for DOM changes related to chat interface
+    // This is a heuristic approach that avoids the need for a polling interval
+    const chatObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList' || mutation.type === 'attributes') {
+          // Check if any chat interfaces are visible
+          const chatInterfaces = document.querySelectorAll('.npc-chat-input');
+          // Update the parent ref
+          updateParentRef();
+        }
+      }
+    });
+    
+    // Start observing the document body for chat-related changes
+    chatObserver.observe(document.body, { 
+      childList: true, 
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'class']
+    });
+    
+    return () => {
+      chatObserver.disconnect();
+    };
+  }, [chatStateRef]);
 
   // Reference for character controller
   const characterControllerRef = useRef<CharacterControllerRef>(null);
@@ -112,8 +205,25 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       if (!containerRef.current) return;
       containerRef.current.appendChild(renderer.domElement);
 
-      // Hide the cursor over the canvas for FPS immersion
+      // Set initial cursor state (will be updated based on chatting state)
       renderer.domElement.style.cursor = 'none';
+
+      // Function to update cursor based on chatting state
+      const updateCursorVisibility = () => {
+        if (isChattingRef.current) {
+          renderer.domElement.style.cursor = 'auto'; // Show cursor when chatting
+        } else {
+          renderer.domElement.style.cursor = 'none'; // Hide cursor when not chatting
+        }
+      };
+
+      // Initial update
+      updateCursorVisibility();
+
+      // Set up an observer on the chatting state to update cursor
+      const chatStateInterval = setInterval(() => {
+        updateCursorVisibility();
+      }, 100);
 
       // Prevent context menu (right-click menu) on the canvas
       const preventContextMenu = (event: MouseEvent) => {
@@ -161,6 +271,11 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
       // Handle keyboard inputs for PC controls
       const onKeyDown = (event: KeyboardEvent) => {
+        // Don't process movement keys if chatting
+        if (isChattingRef.current) {
+          return;
+        }
+        
         // Convert key to lowercase to handle both cases
         const key = event.key.toLowerCase();
 
@@ -176,23 +291,44 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       };
 
       const onKeyUp = (event: KeyboardEvent) => {
+        // Still handle key up events even when chatting to prevent keys getting stuck
         const key = event.key.toLowerCase();
-
         if (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === ' ') {
           keysRef.current[key as keyof typeof keysRef.current] = false;
         }
       };
 
-      // Add event listeners for keyboard controls
+      // Add global event listeners for keyboard controls
       window.addEventListener('keydown', onKeyDown);
       window.addEventListener('keyup', onKeyUp);
 
+      // Prevent mouse actions from moving camera when chatting
+      const preventMouseWhenChatting = (event: MouseEvent) => {
+        if (isChattingRef.current) {
+          // Only prevent default for right clicks and wheel events
+          // Don't prevent left clicks as they're needed for UI interaction
+          if (event.button === 2 || event.type === 'wheel') {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }
+      };
+
+      // Add event listeners for mouse prevention
+      renderer.domElement.addEventListener('mousedown', preventMouseWhenChatting);
+      renderer.domElement.addEventListener('wheel', preventMouseWhenChatting, { passive: false });
+
       // Handle window resize
       const handleResize = () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
+        if (!camera || !renderer) return;
+        
+        const camera3D = camera as THREE.PerspectiveCamera;
+        camera3D.aspect = window.innerWidth / window.innerHeight;
+        camera3D.updateProjectionMatrix();
+        
         renderer.setSize(window.innerWidth, window.innerHeight);
       };
+
       window.addEventListener('resize', handleResize);
 
       // Animation loop with clock for delta time
@@ -202,9 +338,9 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
       const animate = () => {
         animationFrameId = requestAnimationFrame(animate);
 
-        // Only update physics, game logic, and get delta if playing
-        if (gameState === 'playing') {
-          // Get delta ONLY when playing
+        // Only update physics, game logic, and get delta if playing AND NOT chatting
+        if (gameState === 'playing' && !isChattingRef.current) {
+          // Get delta ONLY when playing and not chatting
           const delta = clock.getDelta(); 
           // Clamp delta to avoid huge jumps after resuming or frame drops
           const clampedDelta = Math.min(delta, 0.1); // Max delta of 0.1s (adjust as needed)
@@ -246,9 +382,12 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
         }
         renderer.dispose();
         renderer.domElement.removeEventListener('contextmenu', preventContextMenu);
+        renderer.domElement.removeEventListener('mousedown', preventMouseWhenChatting);
+        renderer.domElement.removeEventListener('wheel', preventMouseWhenChatting);
         window.removeEventListener('resize', handleResize);
         window.removeEventListener('keydown', onKeyDown);
         window.removeEventListener('keyup', onKeyUp);
+        clearInterval(chatStateInterval);
       };
     };
 
@@ -379,8 +518,8 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
 
   return (
     <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'relative' }}>
-      {/* Replace static crosshair with dynamic component */}
-      <Crosshair />
+      {/* Only show crosshair when not chatting */}
+      {!isChattingRef.current && <Crosshair />}
 
       {sceneReady && sceneRef.current && rendererRef.current && cameraRef.current && characterPositionRef.current && worldRef.current && (
         <>
@@ -393,6 +532,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             world={worldRef.current}
             characterPositionRef={characterPositionRef}
             gameState={gameState}
+            isChattingRef={isChattingRef}
           />
 
           {/* Add pond directly (not needed if already added in World) */}
@@ -426,6 +566,7 @@ export default function GameCanvas({ gameState }: { gameState: 'playing' | 'paus
             // Add shorter distance and higher height for better visibility
             distance={7}
             height={3}
+            isChattingRef={isChattingRef}
           />
 
           <WaterBending
