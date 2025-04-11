@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, CSSProperties } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import { AINPCChat } from '@/components/ai-npc-chat';
@@ -15,6 +15,14 @@ interface NPCProps {
   registerUpdate?: (fn: (delta: number) => void) => (() => void) | void;
   gameState?: 'playing' | 'paused';
   isChattingRef?: React.MutableRefObject<boolean>;
+}
+
+// Define the expected message type for initial messages
+interface InitialChatMessage {
+  id: string;
+  content: string;
+  role: 'user' | 'assistant';
+  createdAt?: string; // Optional createdAt
 }
 
 const NPC: React.FC<NPCProps> = ({
@@ -277,17 +285,54 @@ const NPC: React.FC<NPCProps> = ({
     };
   }, [showChat]);
 
-  // Initial chat messages for NPC
-  const initialMessages = [
+  // Dummy messages explicitly typed
+  const dummyMessages: InitialChatMessage[] = [
     {
       id: '1',
-      content: 'Hello traveler! I am an NPC in this world.',
-      user: {
-        name: 'Guide'
-      },
-      createdAt: new Date().toISOString()
-    }
+      content: 'Hello traveler! I am Zephyr, guardian of this spring.',
+      role: 'assistant', // Explicit role
+      createdAt: new Date().toISOString(),
+    },
+    // Add example user message if needed for testing
+    // {
+    //   id: '2',
+    //   content: 'Greetings Zephyr!',
+    //   role: 'user', // Explicit role
+    //   createdAt: new Date().toISOString(),
+    // }
   ];
+
+  // State for messages - Use the correctly typed dummy messages
+  const [initialMessages] = useState(dummyMessages);
+
+  const buttonStyle: CSSProperties = {
+    position: 'absolute',
+    left: '50%',
+    bottom: isMobile ? '500px' : '100px', 
+    transform: 'translateX(-50%)',
+    pointerEvents: 'none', 
+    zIndex: 1500, 
+    width: 'fit-content',
+  };
+
+  const mobileButtonStyle: CSSProperties = {
+    backgroundColor: 'rgba(40, 167, 69, 0.85)',
+    border: 'none',
+    color: 'white',
+    padding: '10px 20px',
+    textAlign: 'center',
+    textDecoration: 'none',
+    display: 'inline-block',
+    fontSize: '16px',
+    margin: '4px 2px',
+    cursor: 'pointer',
+    borderRadius: '5px',
+    fontWeight: 'bold',
+    zIndex: 1501,
+    position: 'relative',
+    pointerEvents: 'auto',
+    boxShadow: '0 0 10px rgba(0, 0, 0, 0.5)',
+  };
 
   // Add interaction hint UI and chat component when appropriate
   return (
@@ -295,51 +340,26 @@ const NPC: React.FC<NPCProps> = ({
       {/* Interaction hint - only shown when nearby, game is playing, and chat isn't open */}
       {isPlayerNearby && gameState === 'playing' && !showChat && (
         <div 
-          style={{
-            position: 'fixed',
-            bottom: '100px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            backgroundColor: 'rgba(0, 0, 0, 0.7)',
-            color: 'white',
-            padding: '10px 15px',
-            borderRadius: '5px',
-            fontFamily: 'Arial, sans-serif',
-            fontSize: '16px',
-            zIndex: 30000,
-            textAlign: 'center',
-            boxShadow: '0 0 10px rgba(0, 0, 0, 0.5)',
-            pointerEvents: 'auto',
-          }}
+          style={buttonStyle}
         >
           {isMobile ? (
-            <span>
-              <button 
-                className="npc-interact-button"
-                onClick={() => setShowChat(true)}
-                style={{
-                  backgroundColor: '#4CAF50',
-                  border: 'none',
-                  color: 'white',
-                  padding: '8px 16px',
-                  textAlign: 'center',
-                  textDecoration: 'none',
-                  display: 'inline-block',
-                  fontSize: '16px',
-                  margin: '4px 2px',
-                  cursor: 'pointer',
-                  borderRadius: '5px',
-                  fontWeight: 'bold',
-                  zIndex: 30001,
-                  position: 'relative',
-                  pointerEvents: 'auto',
-                }}
-              >
-                Interact with NPC
-              </button>
-            </span>
+            <button 
+              className="npc-interact-button"
+              onClick={() => setShowChat(true)}
+              style={mobileButtonStyle} 
+            >
+              Interact with NPC
+            </button>
           ) : (
-            <span>Press <strong>G</strong> to interact with NPC</span>
+            <span style={{ 
+              backgroundColor: 'rgba(0, 0, 0, 0.7)', 
+              color: 'white', 
+              padding: '10px 15px', 
+              borderRadius: '5px',
+              pointerEvents: 'none'
+            }}>
+              Press <strong>G</strong> to interact with NPC
+            </span>
           )}
         </div>
       )}
@@ -386,15 +406,10 @@ const NPC: React.FC<NPCProps> = ({
           </div>
           <div style={{ height: 'calc(100% - 43px)' }}>
             <AINPCChat
-              username={username}
-              initialMessages={[
-                {
-                  id: '1',
-                  content: 'Hello traveler! I am an NPC in this world.',
-                  role: 'assistant'
-                }
-              ]}
+              username="Player"
+              initialMessages={initialMessages}
               onClose={() => setShowChat(false)}
+              npcName="Zephyr"
             />
           </div>
 

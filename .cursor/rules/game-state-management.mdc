@@ -23,38 +23,67 @@ This rule defines standards for managing different game states and their interac
 
 ## State Management Implementation
 
-1. **Game State References**:
+1. **Game State Storage**:
+   - Use `useState` for primary states (`gameState` in `GameWrapper`).
+   - Use `useRef` for secondary states (`isChattingRef`, `isBendingRef`) when direct, mutable access across renders is needed without causing re-renders, especially for frequent updates within the animation loop or event handlers.
+   - Prefer lifting state up (e.g., managing `waterLevels` in `GameCanvas`) over using refs for cross-component communication when the consuming component needs to re-render based on the state change (like `GameUI` needing updated `waterLevels`).
+
    ```typescript
    // Main game state in GameWrapper
    const [gameState, setGameState] = useState<'start' | 'playing' | 'paused'>('start');
    
-   // Secondary states should use refs for cross-component access
+   // Secondary states (refs) in GameCanvas
    const isChattingRef = useRef<boolean>(false);
    const isBendingRef = useRef<boolean>(false);
+
+   // Lifted state in GameCanvas for UI updates
+   const [waterLevels, setWaterLevels] = useState({ current: 0, max: 450, required: 45 });
    ```
 
-2. **State Propagation**:
-   - Pass state references to child components that need them
-   - Use props to communicate state between components
+2. **State Propagation & Updates**: 
+   - **Refs**: Pass refs down as props directly (`isChattingRef={isChattingRef}`). Updates happen by mutating `ref.current`. Ensure the parent component managing the ref receives updates back if necessary (e.g., via callbacks or effects in the child synchronizing with the parent). 
+   - **Lifted State**: Pass state values down as props (`waterLevels={waterLevels}`). Use callback functions defined in the parent (`handleWaterUpdate`) and passed down as props (`onWaterUpdate={handleWaterUpdate}`) for children to trigger state updates in the parent.
+
    ```typescript
-   <NPC 
-     // Other props...
-     gameState={gameState}
-     isChattingRef={isChattingRef}
-   />
+   // Parent (GameCanvas.tsx)
+   const [waterLevels, setWaterLevels] = useState(/* ... */);
+   const isChattingRef = useRef(false);
+
+   const handleWaterUpdate = useCallback((current, max, required) => {
+     setWaterLevels({ current, max, required });
+   }, []);
+
+   return (
+     <>
+       <WaterBending 
+         onWaterUpdate={handleWaterUpdate} 
+         isChattingRef={isChattingRef} 
+         /* other props */ 
+       />
+       <GameUI 
+         waterLevels={waterLevels} 
+         /* other props */ 
+       />
+        <NPC 
+          isChattingRef={isChattingRef} 
+          /* other props */ 
+        />
+     </>
+   );
+
+   // Child (WaterBending.tsx)
+   function WaterBending({ onWaterUpdate, isChattingRef, /* ... */ }) {
+     // ...
+     const triggerWaterUpdate = useCallback(() => {
+       onWaterUpdate(collectedDropsRef.current, MAX_WATER_DROPS, REQUIRED_DROPS_TO_FIRE);
+     }, [onWaterUpdate, /* ... */]);
+
+     // Call triggerWaterUpdate when water level changes
+     // ...
+   }
    ```
 
-3. **State Updates**:
-   - All state updates should happen in effect hooks or event handlers
-   - Secondary states should always sync back to parent components
-   ```typescript
-   // In NPC component
-   useEffect(() => {
-     if (isChattingRef) {
-       isChattingRef.current = showChat;
-     }
-   }, [showChat, isChattingRef]);
-   ```
+3. **State Update Responsibility**: The component *owning* the state (where `useState` or `useRef` is defined) should be responsible for updating it, either directly or through callbacks passed to children.
 
 ## UI Behavior Based on State
 
@@ -141,13 +170,13 @@ This rule defines standards for managing different game states and their interac
 
 ## Examples
 
-### Good: Proper State Checking
+### Good: Proper State Checking (using Ref)
 
 ```typescript
 // In GameCanvas animation loop
 const animate = () => {
   // Only update physics if playing AND NOT chatting
-  if (gameState === 'playing' && !isChattingRef.current) {
+  if (gameState === 'playing' && !isChattingRef.current) { // Check ref directly
     const delta = clock.getDelta();
     updateFunctionsRef.current.forEach(update => update(delta));
   }
@@ -156,20 +185,42 @@ const animate = () => {
 };
 ```
 
-### Bad: Missing State Checks
+### Good: Callback for Lifted State Update
 
 ```typescript
-// BAD - Doesn't check chatting state
-const onKeyDown = (event: KeyboardEvent) => {
-  const key = event.key.toLowerCase();
-  if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
-    keysRef.current[key] = true;
-  }
-};
+// Parent Component (e.g., GameCanvas)
+const [waterLevels, setWaterLevels] = useState(/* ... */);
+
+const handleWaterUpdate = useCallback((current, max, required) => {
+  setWaterLevels({ current, max, required });
+}, []);
+
+return <WaterBending onWaterUpdate={handleWaterUpdate} /* ... */ />;
+
+// Child Component (e.g., WaterBending)
+function WaterBending({ onWaterUpdate, /* ... */ }) {
+  // When water amount changes...
+  onWaterUpdate(newAmount, maxAmount, requiredAmount);
+}
+```
+
+### Bad: Trying to Update Parent State Directly from Child Ref
+
+```typescript
+// BAD - Child should not directly mutate parent state or unrelated refs
+function WaterBending({ isChattingRef /* Prop from parent */ }) {
+  // ...
+  const handleSomeAction = () => {
+    // Don't do this! Let parent handle chat state changes
+    // isChattingRef.current = true; 
+  };
+}
 ```
 
 ## References
 
-- `app/components/GameWrapper.tsx`: Main game state management
-- `app/components/GameCanvas.tsx`: Game rendering and input handling
-- `app/components/NPC.tsx`: NPC interaction and chat management 
+- `app/components/GameWrapper.tsx`: Main game state (`gameState`)
+- `app/components/GameCanvas.tsx`: Secondary refs (`isChattingRef`, `isBendingRef`), Lifted state (`waterLevels`), Callbacks (`handleWaterUpdate`)
+- `app/components/NPC.tsx`: Consumes `isChattingRef`
+- `app/components/WaterBending.tsx`: Calls `onWaterUpdate` callback
+- `app/components/GameUI.tsx`: Consumes `waterLevels` state 

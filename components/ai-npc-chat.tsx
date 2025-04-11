@@ -17,18 +17,21 @@ interface AINPCChatProps {
     role: 'user' | 'assistant';
   }>;
   onClose?: () => void;
+  npcName?: string;
 }
 
 /**
  * AI NPC chat component based on the Vercel AI SDK
  * @param username - The username of the player
  * @param initialMessages - Initial messages to display in the chat
+ * @param npcName - The name of the NPC (defaults to Guide)
  * @returns The chat component
  */
 export const AINPCChat = ({
   username,
   initialMessages = [],
-  onClose
+  onClose,
+  npcName = "Guide"
 }: AINPCChatProps) => {
   const { containerRef, scrollToBottom } = useChatScroll();
   
@@ -115,6 +118,7 @@ export const AINPCChat = ({
                   isOwnMessage={isUser}
                   showHeader={showHeader}
                   username={username}
+                  npcName={npcName}
                 />
               </div>
             );

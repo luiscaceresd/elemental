@@ -10,7 +10,8 @@ import World from './World';
 import Pond from './Pond';
 import Crosshair from './Crosshair';
 import PortalManager from './PortalManager';
-import HealthBar from './HealthBar';
+import GameUIDesktop from './GameUI';
+import GameUIMobile from './GameUIMobile';
 import * as CANNON from 'cannon';
 
 // Add a type for functions with an identifier
@@ -151,6 +152,18 @@ export default function GameCanvas({
 
   // Reference for character controller
   const characterControllerRef = useRef<CharacterControllerRef>(null);
+
+  // Add state for water levels in GameCanvas
+  const [waterLevels, setWaterLevels] = useState({
+    current: 0,
+    max: 450,
+    required: 45,
+  });
+
+  // Callback function to update water state
+  const handleWaterUpdate = useCallback((current: number, max: number, required: number) => {
+    setWaterLevels({ current, max, required });
+  }, []);
 
   // Detect if we're on a mobile device - this effect is necessary as it involves window APIs
   useEffect(() => {
@@ -569,18 +582,22 @@ export default function GameCanvas({
             isChattingRef={isChattingRef}
           />
 
-          <WaterBending
-            scene={sceneRef.current}
-            domElement={rendererRef.current.domElement}
-            registerUpdate={registerUpdate}
-            camera={cameraRef.current}
-            isBendingRef={isBendingRef}
-            crosshairPositionRef={crosshairPositionRef}
-            characterPositionRef={characterPositionRef}
-            world={worldRef.current}
-            updateWaterStatus={handleUpdateWaterStatus}
-            characterControllerRef={characterControllerRef}
-          />
+          {/* Pass the ref to WaterBending */}
+          {sceneReady && worldRef.current && cameraRef.current && rendererRef.current && (
+            <WaterBending
+              scene={sceneRef.current}
+              domElement={rendererRef.current.domElement}
+              registerUpdate={registerUpdate}
+              camera={cameraRef.current}
+              isBendingRef={isBendingRef}
+              crosshairPositionRef={crosshairPositionRef}
+              characterPositionRef={characterPositionRef}
+              world={worldRef.current}
+              updateWaterStatus={handleUpdateWaterStatus}
+              characterControllerRef={characterControllerRef}
+              onWaterUpdate={handleWaterUpdate}
+            />
+          )}
 
           {/* Add PortalManager component */}
           <PortalManager 
@@ -602,8 +619,20 @@ export default function GameCanvas({
             />
           )}
 
-          {/* Add HealthBar component */}
-          <HealthBar characterControllerRef={characterControllerRef} gameState={gameState} />
+          {/* Conditionally render Desktop or Mobile UI */}
+          {isMobile ? (
+            <GameUIMobile
+              characterControllerRef={characterControllerRef}
+              waterLevels={waterLevels}
+              // gameState={gameState} // Pass gameState if needed by GameUIMobile
+            />
+          ) : (
+            <GameUIDesktop 
+              characterControllerRef={characterControllerRef}
+              waterLevels={waterLevels}
+              // gameState={gameState} // Pass gameState if needed by GameUIDesktop
+            />
+          )}
         </>
       )}
     </div>

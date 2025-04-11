@@ -9,13 +9,15 @@ interface AIChatMessageProps {
   isOwnMessage: boolean;
   showHeader: boolean;
   username: string;
+  npcName: string;
 }
 
 export const AIChatMessageItem = ({ 
   message, 
   isOwnMessage, 
   showHeader,
-  username
+  username,
+  npcName
 }: AIChatMessageProps) => {
   return (
     <div className={`flex mt-2 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
@@ -30,7 +32,7 @@ export const AIChatMessageItem = ({
               'justify-end flex-row-reverse': isOwnMessage,
             })}
           >
-            <span className={'font-medium'}>{isOwnMessage ? username : 'Guide'}</span>
+            <span className={'font-medium'}>{isOwnMessage ? username : npcName}</span>
             <span className="text-foreground/50 text-xs">
               {new Date().toLocaleTimeString('en-US', {
                 hour: '2-digit',

@@ -1,0 +1,175 @@
+---
+description: UI component standards for health bars, water meters, and game status displays
+globs: ["**/components/GameUI.tsx", "**/components/HealthBar.tsx", "**/components/WaterMeter.tsx"]
+alwaysApply: false
+---
+
+# Game UI Standards
+
+## Overview
+This rule defines the standards for UI components in the Elemental game, including health bars, water/ammo meters, and status indicators. These standards ensure a consistent, modern UI style inspired by contemporary action games, with a focus on readability and visual feedback.
+
+## UI Layout Standards
+
+1. **UI Positioning**:
+   - Main game UI components should be centered at the bottom of the screen
+   - Use `position: absolute` with `bottom: 20px` and `left: 50%` with `transform: translateX(-50%)`
+   - Status bars should have a fixed width (500px) with `maxWidth: '90vw'` for responsiveness
+   - Maintain minimum 10px spacing between UI elements
+
+2. **Z-Index Hierarchy**:
+   - Game UI elements should use z-index 1000
+   - Ensure UI remains above game elements but below critical overlays (like chat interfaces)
+
+3. **Visibility Rules**:
+   - All UI components must implement the `gameState !== 'playing'` check and return null when paused
+   - Use the `hide-when-paused` class for elements that should be hidden during pause screens
+
+## Status Bar Design Standards
+
+1. **Status Bar Structure**:
+   - Each status bar should have an icon indicator
+   - Bars should be segmented (10 segments) for better readability
+   - Text values should be displayed inside the bar
+   - Use consistent 18px height for all status bars
+   
+2. **Health Bar Design**:
+   - Use green gradient (`#2ecc71` to `#27ae60`) for normal health
+   - Use red gradient (`#e74c3c` to `#c0392b`) for low health (below 25%)
+   - Implement pulse animation for low health warning
+   - Display health as `current/max` in the center of the bar
+
+3. **Water/Ammo Bar Design**:
+   - Use blue gradient (`#00BFFF` to `#0099CC`) for normal state
+   - Use cyan gradient (`#00FFFF` to `#00CCCC`) when ready to fire
+   - Include a visible threshold marker at the required water level
+   - Display "(READY!)" text in cyan when ammo is sufficient to fire
+
+4. **Icon Indicators**:
+   - Use 40px circular icons with glow effects
+   - Icon background color should match the status bar color
+   - Implement pulse animations for critical states
+   - Use emoji or appropriate symbols for clarity (❤️ for health, 💧 for water)
+
+## Visual Feedback Standards
+
+1. **Animation Standards**:
+   - Use keyframe animations for periodic effects
+   - Status changes should animate with a duration of 0.3s
+   - Include subtle animations when taking damage (pulsing)
+   - Always include transitions for smooth state changes: `transition: 'all 0.3s ease'`
+
+2. **Color Coding**:
+   - Green: Good health
+   - Red: Low health/danger
+   - Blue: Water/ammo
+   - Cyan: Ready to fire/special ability available
+
+3. **Glow Effects**:
+   - Use `boxShadow` to create glow effects that match the component's purpose
+   - Increase glow intensity for important or active states
+   - Glow colors should match the primary color of the component
+
+## Accessibility Standards
+
+1. **Text Contrast**:
+   - All text must have sufficient contrast against backgrounds
+   - Use text shadow (`textShadow: '1px 1px 1px black'`) to ensure readability
+   - Minimum font size of 12px for status text
+
+2. **State Indicators**:
+   - Never rely on color alone to indicate state
+   - Include text or icon changes in addition to color changes
+   - Ensure all state changes have appropriate animations
+
+## Implementation
+
+1. **Component Structure**:
+   ```tsx
+   // Main UI container
+   <div className="game-ui-container">
+     {/* Health Bar */}
+     <div className="health-bar-container">
+       <div className="health-icon">...</div>
+       <div className="health-bar-outer">
+         <div className="health-bar-inner" style={{ width: `${healthPercentage}%` }}>...</div>
+         <div className="health-segments">...</div>
+         <div className="health-text">...</div>
+       </div>
+     </div>
+     
+     {/* Water/Ammo Bar */}
+     <div className="ammo-bar-container">
+       <div className="water-icon">...</div>
+       <div className="ammo-bar-outer">
+         <div className="ammo-bar-inner" style={{ width: `${waterPercentage}%` }}>...</div>
+         <div className="ammo-segments">...</div>
+         <div className="ammo-text">...</div>
+       </div>
+     </div>
+   </div>
+   ```
+
+2. **Styling Pattern**:
+   - Use inline styles for dynamic values that change with state
+   - Use JSX global styles for animations
+   - Follow the color coding guidelines for all UI elements
+
+## Examples
+
+### Good: Proper Health Bar Implementation
+
+```tsx
+// Health Bar with proper styling and animations
+<div 
+  className="health-bar-outer"
+  style={{
+    flex: 1,
+    height: '18px',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: '9px',
+    overflow: 'hidden',
+    border: '2px solid rgba(255, 255, 255, 0.3)',
+    boxShadow: '0 0 10px rgba(0, 0, 0, 0.5), inset 0 0 5px rgba(0, 0, 0, 0.5)',
+    position: 'relative',
+    animation: pulseEffect ? 'damage-pulse 0.5s ease' : 'none',
+  }}
+>
+  <div
+    className="health-bar-inner"
+    style={{
+      width: `${healthPercentage}%`,
+      height: '100%',
+      background: `linear-gradient(to right, 
+                    ${lowHealthWarning ? '#e74c3c' : '#2ecc71'}, 
+                    ${lowHealthWarning ? '#c0392b' : '#27ae60'})`,
+      borderRadius: '7px',
+      transition: 'width 0.3s ease, background-color 0.3s ease',
+      boxShadow: 'inset 0 0 10px rgba(255, 255, 255, 0.3)',
+    }}
+  />
+  <div className="health-text">{Math.floor(health)}/{MAX_HEALTH}</div>
+</div>
+```
+
+### Bad: Poor UI Implementation
+
+```tsx
+// Bad implementation without proper styling or feedback
+<div style={{ border: '1px solid black', width: '200px' }}>
+  <div 
+    style={{ 
+      backgroundColor: 'green', 
+      width: health + 'px', 
+      height: '10px' 
+    }}
+  ></div>
+  <span>{health}</span>
+</div>
+```
+
+## References
+
+- `app/components/GameUI.tsx`: Main game UI component
+- `app/components/GameCanvas.tsx`: Integration of UI with game systems
+- Reference: Action game UI inspiration from contemporary titles (2023-2025) 

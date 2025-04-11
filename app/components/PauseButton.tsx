@@ -32,7 +32,7 @@ export default function PauseButton({ onPause, isMobile, isChattingRef }: PauseB
   }, [isMobile, onPause]);
 
   return (
-    <div className="hide-when-paused absolute top-6 right-6 flex flex-col items-center z-50">
+    <div className="hide-when-paused absolute top-6 right-6 flex flex-col items-center z-[1100]">
       <button
         ref={buttonRef}
         onClick={(e) => {

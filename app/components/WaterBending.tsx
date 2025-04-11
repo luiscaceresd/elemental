@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import * as CANNON from 'cannon';
 import Hammer from 'hammerjs';
-import WaterMeter from './WaterMeter';
 import { CharacterControllerRef } from './CharacterController';
 
 // Extend the type definitions for CANNON.World to include missing methods
@@ -29,6 +28,7 @@ interface WaterBendingProps {
   world: CANNON.World;
   updateWaterStatus?: (hasEnoughWater: boolean) => void;
   characterControllerRef?: React.RefObject<CharacterControllerRef | null>;
+  onWaterUpdate: (current: number, max: number, required: number) => void;
 }
 
 // Define a WaterDrop type for our pool
@@ -56,6 +56,7 @@ interface WaterSpear {
 // Debug flag to show water source detection
 const DEBUG_WATER_SOURCES = false;
 
+// Use forwardRef to allow parent components to get a ref to this component
 export default function WaterBending({
   scene,
   domElement,
@@ -66,7 +67,8 @@ export default function WaterBending({
   characterPositionRef,
   world,
   updateWaterStatus,
-  characterControllerRef
+  characterControllerRef,
+  onWaterUpdate
 }: WaterBendingProps) {
   const raycasterRef = useRef<THREE.Raycaster | null>(null);
   const _mousePositionRef = useRef<THREE.Vector2>(new THREE.Vector2()); // Renamed with underscore to indicate intentionally unused
@@ -75,7 +77,6 @@ export default function WaterBending({
   const collectedDropsRef = useRef<number>(0);
   const waterBeltSpheresRef = useRef<THREE.Mesh[]>([]);
   const waterDropPoolRef = useRef<WaterDrop[]>([]);
-  const [displayedDrops, setDisplayedDrops] = useState<number>(0);
   const MAX_WATER_DROPS = 450;
   const REQUIRED_DROPS_TO_FIRE = 45;
   const MAX_VISIBLE_SPHERES = 20;
@@ -95,22 +96,26 @@ export default function WaterBending({
   const SPEAR_POOL_SIZE = 50;
   const activeSpearUpdatesRef = useRef<Set<string>>(new Set());
 
-  useEffect(() => {
-    const updateDisplayCount = () => {
-      setDisplayedDrops(collectedDropsRef.current);
-      requestAnimationFrame(updateDisplayCount);
-    };
-    const animationId = requestAnimationFrame(updateDisplayCount);
-    return () => cancelAnimationFrame(animationId);
-  }, []);
+  // Helper function to call the callback whenever water changes
+  const triggerWaterUpdate = useCallback(() => {
+    onWaterUpdate(collectedDropsRef.current, MAX_WATER_DROPS, REQUIRED_DROPS_TO_FIRE);
+  }, [onWaterUpdate, MAX_WATER_DROPS, REQUIRED_DROPS_TO_FIRE]);
 
+  // Call triggerWaterUpdate after initializing refs if needed, or rely on initial updates
   useEffect(() => {
-    // Update the character animation system when water status changes
+    // Trigger initial update once refs are stable
+    triggerWaterUpdate();
+  }, [triggerWaterUpdate]);
+
+  // Ensure water status effect also triggers update
+  useEffect(() => {
     if (updateWaterStatus) {
       const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
       updateWaterStatus(hasEnoughWater);
     }
-  }, [displayedDrops, updateWaterStatus, REQUIRED_DROPS_TO_FIRE]);
+    // Also trigger the general water update here
+    triggerWaterUpdate();
+  }, [collectedDropsRef.current, updateWaterStatus, REQUIRED_DROPS_TO_FIRE, triggerWaterUpdate]); // Depend on collectedDropsRef.current isn't ideal, but needed for update trigger
 
   const returnSpearToPool = useCallback((spear: WaterSpear) => {
     if (!spear || !spearPoolRef.current.includes(spear)) {
@@ -382,15 +387,8 @@ export default function WaterBending({
         if (!characterPositionRef?.current) return;
         if (collectedDropsRef.current < REQUIRED_DROPS_TO_FIRE) return;
         
-        // Update water status first
-        if (updateWaterStatus) {
-          updateWaterStatus(false);
-          setTimeout(() => {
-            updateWaterStatus(collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE);
-          }, 100);
-        }
-        
         collectedDropsRef.current -= REQUIRED_DROPS_TO_FIRE;
+        triggerWaterUpdate(); // Call update after spending water
 
         // Helper: explosion effect – always trigger explosion on collision/lifetime
         const createExplosionEffect = (position: THREE.Vector3) => {
@@ -746,6 +744,7 @@ export default function WaterBending({
       });
 
       const updateBendingEffects: IdentifiableFunction = (delta: number) => {
+        let waterChanged = false;
         if (isBendingRef.current && crosshairPositionRef.current) {
           if (bendingEffectRef.current) {
             bendingEffectRef.current.position.copy(crosshairPositionRef.current);
@@ -833,6 +832,7 @@ export default function WaterBending({
                     positions[i3 + 1] = -1000;
                     if (collectedDropsRef.current < MAX_WATER_DROPS) {
                       collectedDropsRef.current += 1;
+                      waterChanged = true; // Mark water as changed
                       if (bendingEffectRef.current) {
                         const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
                         material.opacity = 0.8;
@@ -895,6 +895,7 @@ export default function WaterBending({
               if (distance < 1.2) { 
                 if (collectedDropsRef.current < MAX_WATER_DROPS) {
                   collectedDropsRef.current += 1;
+                  waterChanged = true; // Mark water as changed
                   if (bendingEffectRef.current) {
                     const material = bendingEffectRef.current.material as THREE.MeshBasicMaterial;
                     material.opacity = 0.8;
@@ -1018,6 +1019,11 @@ export default function WaterBending({
           const hasEnoughWater = collectedDropsRef.current >= REQUIRED_DROPS_TO_FIRE;
           updateWaterStatus(hasEnoughWater);
         }
+
+        // If water changed during this frame, call the update callback
+        if (waterChanged) {
+          triggerWaterUpdate();
+        }
       };
       updateBendingEffects._id = 'bendingVisualEffects';
       const removeEffectsUpdate = registerUpdate(updateBendingEffects);
@@ -1079,13 +1085,11 @@ export default function WaterBending({
         cleanupFn();
       }
     };
-  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus, characterControllerRef]);
+  }, [scene, domElement, registerUpdate, camera, isBendingRef, crosshairPositionRef, characterPositionRef, world, returnSpearToPool, updateWaterStatus, characterControllerRef, onWaterUpdate]);
 
-  return (
-    <WaterMeter
-      currentWater={displayedDrops}
-      maxWater={MAX_WATER_DROPS}
-      requiredWater={REQUIRED_DROPS_TO_FIRE}
-    />
-  );
+  // No longer renders WaterMeter directly
+  return null;
 }
+
+// Assign a display name for debugging purposes (optional but recommended)
+WaterBending.displayName = 'WaterBending';
